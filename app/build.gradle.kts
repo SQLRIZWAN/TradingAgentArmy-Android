@@ -134,4 +134,8 @@ dependencies {
     implementation(libs.firebase.messaging)
 
     implementation(libs.work.runtime)
+    implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    // MediaPipe's local AAR POM is not reliably transitive in the offline build.
+    // Keep the protobuf runtime explicit so R8 can resolve MediaPipe's generated protos.
+    implementation("com.google.protobuf:protobuf-javalite:4.26.1")
 }

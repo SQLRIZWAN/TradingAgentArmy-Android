@@ -111,8 +111,11 @@ class ChatViewModel @Inject constructor(
             _streamText.value += delta
         }
         _modelChip.value = result.model
-        _banner.value = if (result.backendUsed) null
-        else "⚠️ Direct Mode — Backend Offline${if (result.tier >= 4) " · no AI model available" else " · ${result.model}"}"
+        _banner.value = when {
+            result.backendUsed -> null
+            result.tier >= 4 -> "⚠️ Offline mode — koi AI model available nahi (Settings me key daalein)"
+            else -> null
+        }
         _streamingId.value = null
         _streamText.value = ""
     }

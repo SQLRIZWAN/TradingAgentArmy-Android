@@ -53,6 +53,9 @@ class DashboardViewModel @Inject constructor(
     private val _backendAlive = MutableStateFlow(false)
     val backendAlive: StateFlow<Boolean> = _backendAlive.asStateFlow()
 
+    private val _noBackend = MutableStateFlow(prefs.backendUrl.isBlank())
+    val noBackend: StateFlow<Boolean> = _noBackend.asStateFlow()
+
     private val _wsConnected = ws.connected
     val wsConnected: StateFlow<Boolean> = _wsConnected
 

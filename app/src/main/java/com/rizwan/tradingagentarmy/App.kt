@@ -72,6 +72,7 @@ class App : Application(), Configuration.Provider {
                     NotificationChannel("bot_health", "Bot Health", NotificationManager.IMPORTANCE_DEFAULT).apply {
                         description = "Bot crashes, restarts and gate updates"
                     },
+                    NotificationChannel("agent_army", "Agent Army", NotificationManager.IMPORTANCE_HIGH),
                     NotificationChannel("daily_summary", "Daily Summary", NotificationManager.IMPORTANCE_DEFAULT).apply {
                         description = "Daily P&L summary"
                     }

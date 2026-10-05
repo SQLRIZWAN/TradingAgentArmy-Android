@@ -51,6 +51,13 @@ data class SettingsUi(
     val wsUrl: String = "",
     val bearerToken: String = "",
     val themeMode: String = "light",
+    val localModelPath: String = "",
+    val localModelEnabled: Boolean = false,
+    val armySymbol: String = "BTCUSDT",
+    val agentsEnabled: Boolean = true,
+    val roundMinutes: Int = 15,
+    val hftEnabled: Boolean = false,
+    val liveTrading: Boolean = false,
     val notifyTrades: Boolean = true,
     val notifyCrash: Boolean = true,
     val notifyDaily: Boolean = true,
@@ -65,7 +72,8 @@ class SettingsViewModel @Inject constructor(
     private val prefs: SecurePreferences,
     private val ai: AiProviders,
     private val marketRepo: MarketRepository,
-    private val ws: WebSocketManager
+    private val ws: WebSocketManager,
+    private val bitgetClient: com.rizwan.tradingagentarmy.trading.BitgetClient
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUi())
@@ -107,6 +115,13 @@ class SettingsViewModel @Inject constructor(
             wsUrl = prefs.wsUrl,
             bearerToken = prefs.bearerToken,
             themeMode = prefs.themeMode,
+            localModelPath = prefs.localModelPath,
+            localModelEnabled = prefs.localModelEnabled,
+            armySymbol = prefs.getString("army_symbol", "BTCUSDT"),
+            agentsEnabled = prefs.getBool("agents_enabled", true),
+            roundMinutes = prefs.getInt("army_round_minutes", 15),
+            hftEnabled = prefs.getBool("hft_enabled", false),
+            liveTrading = prefs.getBool("live_trading", false),
             notifyTrades = prefs.notifyTrades,
             notifyCrash = prefs.notifyCrash,
             notifyDaily = prefs.notifyDaily,
@@ -245,6 +260,13 @@ class SettingsViewModel @Inject constructor(
         prefs.wsUrl = s.wsUrl
         prefs.bearerToken = s.bearerToken.trim()
         prefs.themeMode = s.themeMode
+        prefs.localModelPath = s.localModelPath
+        prefs.localModelEnabled = s.localModelEnabled
+        prefs.putString("army_symbol", s.armySymbol.uppercase().trim().ifBlank { "BTCUSDT" })
+        prefs.putBool("agents_enabled", s.agentsEnabled)
+        prefs.putInt("army_round_minutes", s.roundMinutes)
+        prefs.putBool("hft_enabled", s.hftEnabled)
+        prefs.putBool("live_trading", s.liveTrading)
         prefs.notifyTrades = s.notifyTrades
         prefs.notifyCrash = s.notifyCrash
         prefs.notifyDaily = s.notifyDaily
@@ -325,30 +347,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun testBitget() = test("bitget") {
-        val s = _state.value
-        if (s.bitgetKey.isBlank() || s.bitgetSecret.isBlank() || s.bitgetPassphrase.isBlank())
-            throw IllegalStateException("Key/Secret/Passphrase set karein")
-        val ts = System.currentTimeMillis().toString()
-        val method = "GET"
-        val path = "/api/v2/spot/account/info"
-        val sign = base64(hmacSha256Bytes(s.bitgetSecret, ts + method + path + ""))
-        val resp = okhttp3.OkHttpClient().newCall(
-            okhttp3.Request.Builder().url("https://api.bitget.com$path")
-                .header("X-CODEX-API-KEY", s.bitgetKey)
-                .header("X-CODEX-API-SIGN", sign)
-                .header("X-CODEX-API-SIGN-TYPE", "HMACSHA256")
-                .header("X-CODEX-TIMESTAMP", ts)
-                .header("X-CODEX-PASSPHRASE", s.bitgetPassphrase)
-                .get().build()
-        ).execute()
-        resp.use {
-            val body = it.body?.string() ?: ""
-            when {
-                it.isSuccessful && body.contains("00000") -> "Connected · account OK"
-                it.isSuccessful -> "⚠️ HTTP 200 but: ${body.take(120)}"
-                else -> throw IllegalStateException("HTTP ${it.code} ${body.take(120)}")
-            }
-        }
+        val r = bitgetClient.testConnection()
+        if (r.ok) r.message else throw IllegalStateException(r.message)
     }
 
     fun testMt5() = test("mt5") {
@@ -363,6 +363,23 @@ class SettingsViewModel @Inject constructor(
     fun testOpenAi() = test("openai") { ai.testOpenAi() }
     fun testAnthropic() = test("anthropic") { ai.testAnthropic() }
     fun testOllama() = test("ollama") { ai.testOllama() }
+
+    fun importLocalModel(uri: android.net.Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val dir = java.io.File(context.filesDir, "models").apply { mkdirs() }
+                val out = java.io.File(dir, "model.task")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    out.outputStream().use { output -> input.copyTo(output) }
+                } ?: error("File open failed")
+                update { it.copy(localModelPath = out.absolutePath, localModelEnabled = true) }
+                save()
+                _tests.value = _tests.value + ("local" to "✅ Model imported (${out.length() / 1024 / 1024} MB)")
+            }.onFailure {
+                _tests.value = _tests.value + ("local" to "❌ ${it.message}")
+            }
+        }
+    }
 
     fun askAbout() { _showAbout.value = true }
     fun dismissAbout() { _showAbout.value = false }

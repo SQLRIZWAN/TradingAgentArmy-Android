@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -22,6 +23,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.rizwan.tradingagentarmy.ui.army.WarRoomScreen
 import com.rizwan.tradingagentarmy.ui.bots.BotDetailScreen
 import com.rizwan.tradingagentarmy.ui.bots.BotsScreen
 import com.rizwan.tradingagentarmy.ui.chat.ChatScreen
@@ -35,6 +37,7 @@ private val tabs = listOf(
     Tab("chat", "Chat", Icons.Filled.Forum),
     Tab("dashboard", "Dashboard", Icons.Filled.Dashboard),
     Tab("bots", "Bots", Icons.Filled.SmartToy),
+    Tab("army", "Army", Icons.Filled.Groups),
     Tab("settings", "Settings", Icons.Filled.Tune)
 )
 
@@ -87,6 +90,7 @@ fun RootApp() {
                 BotsScreen(onOpen = { id -> nav.navigate("bot_detail/$id") })
             }
             composable("settings") { SettingsScreen() }
+            composable("army") { WarRoomScreen() }
             composable("bot_detail/{botId}") { entry ->
                 val id = entry.arguments?.getString("botId") ?: return@composable
                 BotDetailScreen(botId = id, onBack = { nav.popBackStack() })

@@ -31,7 +31,10 @@ data class ChatTurn(val role: String, val content: String)
  * request so it works fully offline of any backend (Direct Mode).
  */
 @Singleton
-class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
+class AiProviders @Inject constructor(
+    private val prefs: SecurePreferences,
+    private val localLlm: com.rizwan.tradingagentarmy.localmodel.LocalLlm
+) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -56,12 +59,14 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         class OpenAi(model: String) : Target(model, 2)
         class Anthropic(model: String) : Target(model, 2)
         class Ollama(model: String) : Target(model, 3)
+        class Local(model: String) : Target(model, 0)
     }
 
     /** Expand a chain entry (e.g. "gemini-2.0-flash-exp", "ollama:llama3:8b") into a Target. */
     fun resolve(entry: String): Target? {
         val e = entry.trim()
         if (e.isEmpty()) return null
+        if (e == "local" || e.startsWith("local-")) return Target.Local(e)
         if (e.startsWith("ollama:")) return Target.Ollama(e.removePrefix("ollama:"))
         if (":" in e) return Target.Ollama(e)
         return when {
@@ -84,15 +89,18 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
      * Result: ek provider fail ho to agla turant try hota hai.
      */
     fun chain(): List<Target> {
-        if (prefs.pinnedModel.isNotBlank()) {
-            resolve(prefs.pinnedModel)?.filterConfigured()?.let { return listOf(it) }
+        val localFirst = if (prefs.localModelEnabled && prefs.localModelPath.isNotBlank())
+            listOf(Target.Local("local-gemma")) else emptyList()
+        if (prefs.pinnedModel.isNotBlank() && prefs.pinnedModel != "local") {
+            resolve(prefs.pinnedModel)?.filterConfigured()?.let { return localFirst + listOf(it) }
         }
         val ordered = LinkedHashMap<String, Target>()
         prefs.fallbackChain.split(",").forEach { entry ->
             resolve(entry)?.filterConfigured()?.let { ordered[it.model] = it }
         }
         autoTargets().forEach { t -> if (!ordered.containsKey(t.model)) ordered[t.model] = t }
-        return ordered.values.toList()
+        val rest = ordered.values.filter { it !is Target.Local }
+        return localFirst + rest
     }
 
     /** Providers the user has keys/endpoint for — in preferred priority order. */
@@ -114,6 +122,7 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         is Target.OpenAi -> if (prefs.openaiKey.isNotBlank()) this else null
         is Target.Anthropic -> if (prefs.anthropicKey.isNotBlank()) this else null
         is Target.Ollama -> if (prefs.ollamaModel.isNotBlank()) this else null
+        is Target.Local -> if (prefs.localModelEnabled && prefs.localModelPath.isNotBlank()) this else null
     }
 
     fun labelOf(target: Target): String = when (target) {
@@ -122,6 +131,7 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         is Target.OpenAi -> "OpenAI"
         is Target.Anthropic -> "Claude"
         is Target.Ollama -> "Ollama"
+        is Target.Local -> "On-device"
     }
 
     /**
@@ -136,6 +146,11 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         onDelta: suspend (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
         when (target) {
+            is Target.Local -> {
+                val out = localLlm.generate(system, userText)
+                onDelta(out)
+                out
+            }
             is Target.Gemini -> streamGemini(target.model, system, history, userText, onDelta)
             is Target.DeepSeek -> streamDeepSeek(target.model, system, history, userText, onDelta)
             is Target.OpenAi -> streamOpenAi(target.model, system, history, userText, onDelta)

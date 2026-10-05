@@ -115,6 +115,13 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         get() = getString(K_DEEPSEEK_MODEL, "deepseek-chat")
         set(v) = putString(K_DEEPSEEK_MODEL, v)
 
+    var localModelPath: String
+        get() = getString(K_LOCAL_MODEL_PATH)
+        set(v) = putString(K_LOCAL_MODEL_PATH, v)
+    var localModelEnabled: Boolean
+        get() = getBool(K_LOCAL_MODEL_ENABLED, false)
+        set(v) = putBool(K_LOCAL_MODEL_ENABLED, v)
+
     var fallbackChain: String
         get() = migrateChain(getString(K_FALLBACK_CHAIN, DEFAULT_CHAIN))
         set(v) = putString(K_FALLBACK_CHAIN, v)
@@ -191,6 +198,8 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         const val K_ANTHROPIC_MODEL = "anthropic_model"
         const val K_OLLAMA_URL = "ollama_url"
         const val K_OLLAMA_MODEL = "ollama_model"
+        const val K_LOCAL_MODEL_PATH = "local_model_path"
+        const val K_LOCAL_MODEL_ENABLED = "local_model_enabled"
         const val K_FALLBACK_CHAIN = "fallback_chain"
         const val K_PINNED_MODEL = "pinned_model"
         const val K_BACKEND_URL = "backend_url"

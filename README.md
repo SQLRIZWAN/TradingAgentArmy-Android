@@ -1,12 +1,19 @@
 # AI Trading Army — Android
 
+## 📲 Download APK
+**👉 [Latest release APK](https://github.com/SQLRIZWAN/TradingAgentArmy-Android/releases/download/latest-build/TradingAgentArmy-v3.0.1-release.apk)** ← tap to install ( Releases page me bhi milega )
+
 Production Android client for the TradingAgentArmy fleet (package `com.rizwan.tradingagentarmy`, version **3.0.1**).
 
 ## Features
 - **Chat** — AI trade assistant with streaming replies. Pinned model = Tier‑1 (Gemini), automatic fallback chain: Gemini → OpenAI → Claude → Ollama → offline rule‑based replies. Backend `/api/chat` is tried first when configured.
 - **Dashboard** — live market tickers (Binance/Bybit/Bitget public data), bot P&L, WS connection state.
 - **Bots** — fleet list with Demo→Live gates (Gate 1 backtest / Gate 2 paper 72h / Gate 3 micro live), bot detail with trade history + cumulative P&L chart, force‑deploy behind CONFIRM.
-- **Settings** — encrypted exchange API keys (Bitget / Binance / Bybit / MT5) with connection tests, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
+- **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents chat in a War Room, read the trade DB (past results), search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications.
+- **⚡ HFT Scalper** — fast loop (2s ticks, EMA 9/21 cross + RSI) with risk guards, paper by default.
+- **🏦 Bitget** — spot API (HMAC v2) test + market orders for LIVE mode; PAPER default so real money stays safe until you flip the switch.
+- **📱 On-device model** — select a Gemma `.task` file (Settings → Local Model) and chat/agents run fully offline via MediaPipe.
+- **Settings** — tabbed: AI Keys / Local Model / Exchange / Backend / Army / Look. Auto-save on typing. encrypted exchange API keys (Bitget / Binance / Bybit / MT5) with connection tests, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
 - **Notifications** — trade alerts, bot crash, circuit breaker, daily P&L summary (WorkManager, on‑demand init).
 - **Firebase** — project `sqlrrr`: anonymous auth, Firestore sync of chats/trades/bots/history, FCM. All Firebase config stays in **GitHub Secrets** — never in the repo.
 

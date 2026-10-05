@@ -21,6 +21,11 @@ object Tokens {
     var TextPrimary by mutableStateOf(Color(0xFF14171A))
     var TextSecondary by mutableStateOf(Color(0xFF5F6B7A))
     var UserBubble by mutableStateOf(Color(0xFFD7F5EC))
+    var AccentSecondary by mutableStateOf(Color(0xFF2F6FED))
+    var TextTertiary by mutableStateOf(Color(0xFF8A95A5))
+    val ErrorRed get() = AccentDanger
+    val SuccessGreen get() = AccentPrimary
+    val WarningAmber get() = AccentWarning
 
     // dark palette (used by dark mode)
     internal val DarkBackground = Color(0xFF0A0C0F)

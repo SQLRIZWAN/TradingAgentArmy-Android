@@ -27,6 +27,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -47,6 +51,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.rizwan.tradingagentarmy.BuildConfig
 import com.rizwan.tradingagentarmy.ui.theme.AppFonts
@@ -58,6 +64,10 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
     val tests by vm.tests.collectAsState()
     val saved by vm.saved.collectAsState()
     val showAbout by vm.showAbout.collectAsState()
+    var settingsTab by remember { mutableStateOf(0) }
+    val modelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { vm.importLocalModel(it) } }
 
     Scaffold(
         containerColor = Tokens.BackgroundBase,
@@ -102,6 +112,22 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
+            ScrollableTabRow(
+                selectedTabIndex = settingsTab,
+                containerColor = Tokens.Surface,
+                contentColor = Tokens.AccentPrimary,
+                edgePadding = 0.dp
+            ) {
+                listOf("🔑 AI Keys", "📱 Local Model", "🏦 Exchange", "🌐 Backend", "🤖 Army", "🎨 Look").forEachIndexed { i, label ->
+                    Tab(
+                        selected = settingsTab == i,
+                        onClick = { settingsTab = i },
+                        text = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+
+            if (settingsTab == 0) {
             // ================= ① AI MODELS =================
             SectionCard(
                 step = "①",
@@ -227,6 +253,44 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 }
             }
 
+            }
+            if (settingsTab == 1) {
+                SectionCard(
+                    step = "L",
+                    title = "On-Device Model (Local Gemma)",
+                    subtitle = "Model phone me hi chalega — data bhi private, offline bhi kaam karega."
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(onClick = { modelPicker.launch(arrayOf("*/*")) }) {
+                            Text("📁 Select model file", color = Tokens.AccentPrimary)
+                        }
+                        if (s.localModelPath.isNotBlank())
+                            Text(
+                                "✓ ${s.localModelPath.substringAfterLast('/')}",
+                                color = Tokens.AccentPrimary,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                    }
+                    SwitchRow("Chain me on-device model ko pehle rakho", s.localModelEnabled) { v ->
+                        vm.update { it.copy(localModelEnabled = v) }
+                    }
+                    HorizontalDivider(color = Tokens.BorderSubtle)
+                    Text(
+                    "Kaise: HuggingFace/Kaggle se Gemma .task file phone me download karein (WiFi, 1-4GB), " +
+                        "phir yahan select karein. Selected file app ke private folder me copy ho jati hai. " +
+                        "Gemini key bhi ho to dono ek sath kaam karte hain (auto-fallback).",
+                        color = Tokens.TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TestRow("local", tests["local"]) { }
+                }
+            }
+
+            if (settingsTab == 2) {
             // ================= ③ EXCHANGES =================
             SectionCard(
                 step = "③",
@@ -255,6 +319,8 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 TestRow("mt5", tests["mt5"]) { vm.testMt5() }
             }
 
+            }
+            if (settingsTab == 3) {
             // ================= ④ BACKEND =================
             SectionCard(
                 step = "④",
@@ -271,7 +337,35 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 TestRow("backend", tests["backend"]) { vm.testBackend() }
             }
 
-            // ================= ⑤ LOOKS + NOTIFICATIONS =================
+            }
+            if (settingsTab == 4) {
+                SectionCard(
+                    step = "A",
+                    title = "Agent Army + HFT (24/7)",
+                    subtitle = "14 AI agents milkar market dekhte hain, debate karte hain, trade decision lete hain."
+                ) {
+                    PlainField("Trading symbol (jaise BTCUSDT)", s.armySymbol) { v ->
+                        vm.update { it.copy(armySymbol = v) }
+                    }
+                    SwitchRow("24/7 auto rounds (Army screen se START karein)", s.agentsEnabled) { v ->
+                        vm.update { it.copy(agentsEnabled = v) }
+                    }
+                    SwitchRow("⚡ HFT Scalper engine (fast loop, paper)", s.hftEnabled) { v ->
+                        vm.update { it.copy(hftEnabled = v) }
+                    }
+                    HorizontalDivider(color = Tokens.BorderSubtle)
+                    SwitchRow("🔴 LIVE trading — real money (Exchange tab me Bitget keys chahiye)", s.liveTrading) { v ->
+                        vm.update { it.copy(liveTrading = v) }
+                    }
+                    Text(
+                        "Default PAPER mode hai — koi asli paisa nahi lagta. LIVE on karne se pehle " +
+                            "risk rules samajh lein: daily loss limit aur kill-switch Army screen par milte hain.",
+                        color = Tokens.AccentDanger,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            if (settingsTab == 5) {
             SectionCard(
                 step = "⑤",
                 title = "App Color + Notifications",
@@ -347,6 +441,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                         Text("Clear All Keys", color = Tokens.AccentDanger)
                     }
                 }
+            }
             }
         }
     }

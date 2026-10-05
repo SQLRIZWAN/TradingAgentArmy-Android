@@ -62,6 +62,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
     val circuit by viewModel.circuit.collectAsState()
     val backendAlive by viewModel.backendAlive.collectAsState()
     val wsConnected by viewModel.wsConnected.collectAsState()
+    val noBackend by viewModel.noBackend.collectAsState()
     val lastSync by viewModel.lastSync.collectAsState()
     val selected by viewModel.selected.collectAsState()
     val chartError by viewModel.chartError.collectAsState()
@@ -81,7 +82,15 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusDot(backendAlive, if (backendAlive) "Backend" else if (wsConnected) "WS" else "Offline")
+                StatusDot(
+                    backendAlive || noBackend,
+                    when {
+                        backendAlive -> "Backend"
+                        noBackend -> "Cloud AI"
+                        wsConnected -> "WS"
+                        else -> "Offline"
+                    }
+                )
                 StatusDot(wsConnected || !backendAlive, if (wsConnected) "Live feed" else "Polling")
                 Text(
                     text = "Sync " + if (lastSync == 0L) "—" else SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(lastSync)),

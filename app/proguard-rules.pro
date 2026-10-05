@@ -28,3 +28,6 @@
 
 # Play Core (unused split refs)
 -dontwarn com.google.android.play.core.**
+
+# MediaPipe tasks-genai: protobuf annotations are compile-time only (runtime = protobuf-javalite via Firebase)
+-dontwarn com.google.protobuf.**
