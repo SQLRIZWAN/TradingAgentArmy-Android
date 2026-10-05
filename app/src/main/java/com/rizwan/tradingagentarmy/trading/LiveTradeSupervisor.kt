@@ -47,18 +47,85 @@ class LiveTradeSupervisor @Inject constructor(
 
     private suspend fun reconcile() {
         if (!prefs.getBool("live_trading", false) || !bitget.configured) return
-        val open = trades.openTrades()
-        open.groupBy { it.marketType }.forEach { (market, rows) ->
+        val syncAt = System.currentTimeMillis()
+        trades.markPendingUnknown(syncAt)
+        val local = trades.openTrades()
+        val cfdLocal = local.filter {
+            it.marketType == "CFD" && (it.mode.equals("live", true) || it.mode.equals("hft-live", true))
+        }
+        val remote = bitget.cfdPositionList().getOrElse {
+            AppEvents.record("reconcile", "cfd snapshot failed: ${it.message}")
+            return
+        }
+        val remoteIds = remote.map { it.positionId }.toSet()
+        remote.forEach { position ->
+            val currentPrice = if (position.quantity > 0.0) {
+                if (position.side == "BUY") position.openPrice + position.totalProfit / position.quantity
+                else position.openPrice - position.totalProfit / position.quantity
+            } else position.openPrice
+            val existing = trades.byPositionId(position.positionId)
+                ?: cfdLocal.firstOrNull {
+                    it.positionId.isBlank() && it.symbol.equals(position.symbol, true) &&
+                        ((it.side == "BUY" && position.side == "BUY") || (it.side == "SELL" && position.side == "SELL"))
+                }
+            if (existing == null) {
+                trades.insert(
+                    com.rizwan.tradingagentarmy.data.local.TradeEntity(
+                        symbol = position.symbol,
+                        side = position.side,
+                        entry = position.openPrice,
+                        actualEntry = position.openPrice,
+                        exit = null,
+                        pnl = position.unrealizedPnl,
+                        mode = "live",
+                        botName = "Recovered CFD",
+                        model = "exchange-reconciliation",
+                        timestamp = syncAt,
+                        positionId = position.positionId,
+                        status = "OPEN",
+                        marketType = "CFD",
+                        stopLoss = position.stopLoss,
+                        takeProfit = position.takeProfit,
+                        quantity = position.quantity,
+                        filledQuantity = position.quantity,
+                        protectionStatus = if (position.stopLoss != null && position.takeProfit != null) "VERIFIED" else "MISSING",
+                        lastExchangeSync = syncAt,
+                        currentPrice = currentPrice,
+                        unrealizedPnl = position.totalProfit
+                    )
+                )
+                AppEvents.record("reconcile", "recovered ${position.symbol}/${position.positionId}")
+            } else {
+                trades.updateExchangeState(
+                    existing.id, position.positionId, position.openPrice, position.openPrice,
+                    position.quantity, position.quantity, position.stopLoss, position.takeProfit,
+                    if (position.stopLoss != null && position.takeProfit != null) "VERIFIED" else "MISSING",
+                    syncAt, currentPrice, position.totalProfit, "OPEN"
+                )
+            }
+        }
+        cfdLocal.filter { it.positionId.isNotBlank() && it.positionId !in remoteIds }.forEach { stale ->
+            val price = tools.lastPrice(stale.symbol)
+            if (price > 0.0) {
+                val pnl = if (stale.side == "BUY") (price - stale.entry) * stale.quantity else (stale.entry - price) * stale.quantity
+                trades.closeTrade(stale.id, price, pnl, "RECONCILED_CLOSED")
+                AppEvents.record("reconcile", "closed local stale ${stale.symbol}/${stale.positionId}")
+            }
+        }
+        val other = local.filter {
+            (it.mode.equals("live", true) || it.mode.equals("hft-live", true)) && it.marketType != "CFD"
+        }
+        other.groupBy { it.marketType }.forEach { (market, rows) ->
             val result = if (market == "FUTURES") bitget.currentFuturesPositions()
-            else if (market == "CFD") bitget.currentCfdPositions(rows.firstOrNull()?.symbol ?: "")
             else bitget.currentSpotPlans(rows.firstOrNull()?.symbol ?: prefs.getString("army_symbol", "BTCUSDT"))
-            AppEvents.record("reconcile", "${market.lowercase()} exchange snapshot ok=${result.first}, localOpen=${rows.size}")
+            AppEvents.record("reconcile", "${market.lowercase()} snapshot ok=${result.first}, localOpen=${rows.size}")
         }
     }
 
     private suspend fun monitorOnce() {
         if (!prefs.getBool("live_trading", false) || !bitget.configured) return
         for (trade in trades.openTrades()) {
+            if (!trade.mode.equals("live", true) && !trade.mode.equals("hft-live", true)) continue
             val price = tools.lastPrice(trade.symbol)
             if (price <= 0.0) continue
             val hit = when {
@@ -76,7 +143,12 @@ class LiveTradeSupervisor @Inject constructor(
             val closeSide = if (trade.side == "BUY") "sell" else "buy"
             val oid = "exit_${trade.clientOid.ifBlank { trade.id.toString() }}_$hit"
             val result = if (trade.marketType == "CFD") {
-                bitget.closeCfd(trade.symbol)
+                val positionId = trade.positionId.ifBlank {
+                    bitget.cfdPositionList(trade.symbol).getOrDefault(emptyList())
+                        .firstOrNull { it.symbol.equals(trade.symbol, true) && it.side.equals(if (trade.side == "BUY") "BUY" else "SELL", true) }
+                        ?.positionId.orEmpty()
+                }
+                bitget.closeCfdPosition(positionId, trade.quantity)
             } else if (trade.marketType == "FUTURES") {
                 bitget.closeFuturesMarket(trade.symbol, closeSide, "%.8f".format(trade.quantity), oid)
             } else {

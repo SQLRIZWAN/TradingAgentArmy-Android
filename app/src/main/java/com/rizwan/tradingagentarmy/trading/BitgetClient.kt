@@ -4,6 +4,7 @@ import com.rizwan.tradingagentarmy.data.local.SecurePreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -25,6 +26,19 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
 
     data class BitgetResult(val ok: Boolean, val message: String)
     data class OrderResult(val ok: Boolean, val message: String, val orderId: String = "", val clientOid: String = "")
+    data class CfdQuote(val symbol: String, val bid: Double, val ask: Double, val high: Double, val low: Double, val ts: Long)
+    data class CfdCandle(val ts: Long, val open: Double, val high: Double, val low: Double, val close: Double)
+    data class CfdPosition(
+        val positionId: String,
+        val symbol: String,
+        val side: String,
+        val quantity: Double,
+        val openPrice: Double,
+        val takeProfit: Double?,
+        val stopLoss: Double?,
+        val unrealizedPnl: Double,
+        val totalProfit: Double
+    )
 
     val configured: Boolean
         get() = prefs.bitgetKey.isNotBlank() && prefs.bitgetSecret.isNotBlank() && prefs.bitgetPassphrase.isNotBlank()
@@ -57,7 +71,13 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
 
     private fun result(raw: String, ok: Boolean, message: String): OrderResult = runCatching {
         val data = json.parseToJsonElement(raw).jsonObject["data"]?.jsonObject
-        OrderResult(ok, message, data?.get("orderId")?.jsonPrimitive?.content.orEmpty(), data?.get("clientOid")?.jsonPrimitive?.content.orEmpty())
+        OrderResult(
+            ok,
+            message,
+            data?.get("orderId")?.jsonPrimitive?.content
+                ?: data?.get("trxId")?.jsonPrimitive?.content.orEmpty(),
+            data?.get("clientOid")?.jsonPrimitive?.content.orEmpty()
+        )
     }.getOrElse { OrderResult(false, "Invalid exchange response: ${it.message}") }
 
     suspend fun testConnection(): BitgetResult {
@@ -157,7 +177,6 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
             append("{\"symbol\":\"${symbol.uppercase()}\",\"orderType\":\"market\",\"side\":\"${side.lowercase()}\",\"qty\":\"${"%.8f".format(Locale.US, qty)}\"")
             if (takeProfit != null) append(",\"takeProfit\":\"${price(takeProfit)}\"")
             if (stopLoss != null) append(",\"stopLoss\":\"${price(stopLoss)}\"")
-            if (clientOid.isNotBlank()) append(",\"clientOid\":\"$clientOid\"")
             append("}")
         }
         val (code, body) = call("POST", "/api/v3/cfd/trade/place-order", payload)
@@ -165,9 +184,10 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         return result(body, r.ok, if (r.ok) "OK" else "HTTP $code · ${r.message}")
     }
 
-    suspend fun closeCfd(symbol: String): OrderResult {
-        val payload = """{"symbol":"${symbol.uppercase()}"}"""
-        val (code, body) = call("POST", "/api/v3/cfd/trade/close-all-positions", payload)
+    suspend fun closeCfdPosition(positionId: String, quantity: Double): OrderResult {
+        if (positionId.isBlank() || quantity <= 0.0) return OrderResult(false, "CFD positionId/quantity missing")
+        val payload = """{"positionId":"$positionId","qty":"${"%.8f".format(Locale.US, quantity)}"}"""
+        val (code, body) = call("POST", "/api/v3/cfd/trade/close-positions", payload)
         val r = parse(body)
         return result(body, r.ok, if (r.ok) "OK" else "HTTP $code · ${r.message}")
     }
@@ -176,6 +196,70 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         val query = if (symbol.isBlank()) "" else "?symbol=${symbol.uppercase()}"
         val (code, body) = call("GET", "/api/v3/cfd/trade/current-positions$query")
         return (code in 200..299 && parse(body).ok) to body
+    }
+
+    suspend fun cfdPositionList(symbol: String = ""): Result<List<CfdPosition>> = runCatching {
+        val (code, body) = call("GET", "/api/v3/cfd/trade/current-positions" + if (symbol.isBlank()) "" else "?symbol=${symbol.uppercase()}")
+        if (code !in 200..299 || !parse(body).ok) error("CFD positions HTTP $code: ${parse(body).message}")
+        val data = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
+        data.mapNotNull { row ->
+            val o = row.jsonObject
+            val id = o["positionId"]?.jsonPrimitive?.content.orEmpty()
+            val sym = o["symbol"]?.jsonPrimitive?.content.orEmpty()
+            val qty = o["qty"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+            if (id.isBlank() || sym.isBlank() || qty <= 0.0) return@mapNotNull null
+            CfdPosition(
+                positionId = id,
+                symbol = sym,
+                side = o["side"]?.jsonPrimitive?.content.orEmpty().uppercase(),
+                quantity = qty,
+                openPrice = o["openPrice"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0,
+                takeProfit = o["takeProfit"]?.jsonPrimitive?.content?.toDoubleOrNull(),
+                stopLoss = o["stopLoss"]?.jsonPrimitive?.content?.toDoubleOrNull(),
+                unrealizedPnl = o["unrealizedPnl"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0,
+                totalProfit = o["totalProfit"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+            )
+        }
+    }
+
+    suspend fun cfdQuote(symbol: String): Result<CfdQuote> = runCatching {
+        val (code, body) = call("GET", "/api/v3/cfd/market/tickers?symbol=${symbol.uppercase()}")
+        if (code !in 200..299 || !parse(body).ok) error("CFD ticker HTTP $code: ${parse(body).message}")
+        val data = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray
+            ?: error("CFD ticker has no data")
+        val o = data.firstOrNull()?.jsonObject ?: error("CFD ticker empty")
+        val bid = o["bid1"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+        val ask = o["ask1"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+        if (bid <= 0.0 || ask <= 0.0) error("CFD ticker has invalid bid/ask")
+        CfdQuote(
+            symbol = o["symbol"]?.jsonPrimitive?.content ?: symbol.uppercase(),
+            bid = bid,
+            ask = ask,
+            high = o["highPrice"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0,
+            low = o["lowPrice"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0,
+            ts = o["quoteTime"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+        )
+    }
+
+    suspend fun cfdPrice(symbol: String, side: String = "buy"): Result<Double> =
+        cfdQuote(symbol).map { if (side.equals("sell", true)) it.bid else it.ask }
+
+    suspend fun cfdCandles(symbol: String, interval: String = "1m", side: String = "buy", limit: Int = 100): Result<List<CfdCandle>> = runCatching {
+        val path = "/api/v3/cfd/market/history-candlestick?symbol=${symbol.uppercase()}&interval=$interval&side=$side&limit=${limit.coerceIn(1, 100)}"
+        val (code, body) = call("GET", path)
+        if (code !in 200..299 || !parse(body).ok) error("CFD candles HTTP $code: ${parse(body).message}")
+        val data = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
+        data.mapNotNull { row ->
+            val a = row as? JsonArray ?: return@mapNotNull null
+            if (a.size < 5) return@mapNotNull null
+            CfdCandle(
+                ts = a[0].jsonPrimitive.content.toLongOrNull() ?: return@mapNotNull null,
+                open = a[1].jsonPrimitive.content.toDoubleOrNull() ?: return@mapNotNull null,
+                high = a[2].jsonPrimitive.content.toDoubleOrNull() ?: return@mapNotNull null,
+                low = a[3].jsonPrimitive.content.toDoubleOrNull() ?: return@mapNotNull null,
+                close = a[4].jsonPrimitive.content.toDoubleOrNull() ?: return@mapNotNull null
+            )
+        }
     }
 
     private fun price(value: Double): String = "%.8f".format(Locale.US, value).trimEnd('0').trimEnd('.')

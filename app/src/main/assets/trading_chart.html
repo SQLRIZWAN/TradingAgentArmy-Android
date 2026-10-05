@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <style>
+    html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#101722;color:#9aaac0;font-family: sans-serif}
+    #chart{width:100%;height:100%}
+    #badge{position:fixed;top:8px;right:10px;font-size:10px;color:#8de6c0;background:#18332f;padding:4px 7px;border-radius:6px;z-index:2}
+  </style>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div id="badge">LIVE MARKET DATA</div><div id="root"><div id="chart"></div></div>
+<script>
+let chart, candles, emaLine, rsiLine, volume;
+function ema(values, period){let k=2/(period+1), out=[], e=values[0]||0; values.forEach((v,i)=>{e=i===0?v:v*k+e*(1-k);out.push(e)});return out}
+function rsi(values, period){let out=values.map(()=>50), gain=0,loss=0; for(let i=1;i<values.length;i++){let d=values[i]-values[i-1];gain+=Math.max(0,d);loss+=Math.max(0,-d);if(i>=period){let rs=loss===0?100:gain/Math.max(loss,.00000001);out[i]=100-100/(1+rs);let old=values[i-period+1]-values[i-period];gain-=Math.max(0,old);loss-=Math.max(0,-old)}} return out}
+function init(){
+  chart=LightweightCharts.createChart(document.getElementById('chart'),{layout:{background:{color:'#101722'},textColor:'#9aaac0'},grid:{vertLines:{color:'#1c2938'},horzLines:{color:'#1c2938'}},rightPriceScale:{borderColor:'#26364a'},timeScale:{borderColor:'#26364a',timeVisible:true},crosshair:{mode:LightweightCharts.CrosshairMode.Normal}});
+  candles=chart.addCandlestickSeries({upColor:'#48d6a5',downColor:'#ff647c',borderUpColor:'#48d6a5',borderDownColor:'#ff647c',wickUpColor:'#48d6a5',wickDownColor:'#ff647c'});
+  emaLine=chart.addLineSeries({color:'#f5b942',lineWidth:1,priceLineVisible:false});
+  rsiLine=chart.addLineSeries({color:'#a987ff',lineWidth:1,priceLineVisible:false,priceScaleId:'rsi'});
+  chart.priceScale('rsi').applyOptions({scaleMargins:{top:.78,bottom:.08},visible:false});
+  volume=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'volume',scaleMargins:{top:.82,bottom:0},color:'#38516b'});
+  window.addEventListener('resize',()=>chart.applyOptions({width:innerWidth,height:innerHeight}));
+}
+function setBars(raw){
+  if(!chart) init();
+  let bars=(raw||[]).filter(x=>x.ts>0).map(x=>({time:Math.floor(x.ts/1000),open:x.o,high:x.h,low:x.l,close:x.c}));
+  if(!bars.length)return;
+  candles.setData(bars);
+  let closes=bars.map(x=>x.close), e=ema(closes,20), r=rsi(closes,14);
+  emaLine.setData(bars.map((x,i)=>({time:x.time,value:e[i]})));
+  rsiLine.setData(bars.map((x,i)=>({time:x.time,value:r[i]})));
+  volume.setData(bars.map(x=>({time:x.time,value:Math.max(0,x.close-x.open),color:x.close>=x.open?'#234b43':'#542d3a'})));
+  chart.timeScale().fitContent();
+}
+init();
+</script>
+</body>
+</html>

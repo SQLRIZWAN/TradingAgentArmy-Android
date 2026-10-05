@@ -6,6 +6,7 @@ import com.rizwan.tradingagentarmy.data.remote.BackendApiService
 import com.rizwan.tradingagentarmy.data.remote.MarketApi
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
 import com.rizwan.tradingagentarmy.domain.model.PortfolioSummary
+import com.rizwan.tradingagentarmy.trading.BitgetClient
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import javax.inject.Inject
@@ -16,13 +17,26 @@ class MarketRepository @Inject constructor(
     private val marketApi: MarketApi,
     private val backend: BackendApiService,
     private val botDao: BotDao,
-    private val prefs: SecurePreferences
+    private val prefs: SecurePreferences,
+    private val bitget: BitgetClient
 ) {
     suspend fun watchlist(): List<MarketTicker> = coroutineScope {
         val crypto = async { marketApi.cryptoTickers() }
-        val fx = async { marketApi.fxTickers() }
-        val gold = async { marketApi.goldTicker() }
-        crypto.await() + fx.await() + listOfNotNull(gold.await())
+        val cfd = async { cfdWatchlist() }
+        crypto.await() + cfd.await()
+    }
+
+    private suspend fun cfdWatchlist(): List<MarketTicker> {
+        val symbols = listOf("XAUUSD", "XAGUSD", "EURUSD", "GBPUSD", "USDJPY")
+        if (!bitget.configured) {
+            return marketApi.fxTickers() + listOfNotNull(marketApi.goldTicker())
+        }
+        return symbols.mapNotNull { symbol ->
+            bitget.cfdQuote(symbol).getOrNull()?.let { q ->
+                val mid = (q.bid + q.ask) / 2.0
+                MarketTicker(symbol, mid, 0.0, if (symbol.contains("USD") && !symbol.startsWith("XAU") && !symbol.startsWith("XAG")) 5 else 2)
+            }
+        }
     }
 
     suspend fun portfolio(todayPnlLocal: Double, totalPnlLocal: Double): PortfolioSummary {

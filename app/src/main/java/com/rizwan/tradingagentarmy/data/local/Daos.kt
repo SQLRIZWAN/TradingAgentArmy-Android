@@ -47,14 +47,26 @@ interface TradeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: TradeEntity): Long
 
-    @Query("SELECT * FROM trades WHERE status = 'OPEN' ORDER BY timestamp ASC")
+    @Query("SELECT * FROM trades WHERE status IN ('OPEN', 'PAPER_OPEN', 'EXIT_PENDING', 'UNKNOWN') ORDER BY timestamp ASC")
     suspend fun openTrades(): List<TradeEntity>
 
     @Query("SELECT * FROM trades WHERE clientOid = :clientOid LIMIT 1")
     suspend fun byClientOid(clientOid: String): TradeEntity?
 
+    @Query("SELECT * FROM trades WHERE positionId = :positionId LIMIT 1")
+    suspend fun byPositionId(positionId: String): TradeEntity?
+
+    @Query("SELECT * FROM trades WHERE status IN ('OPEN', 'PAPER_OPEN', 'EXIT_PENDING', 'UNKNOWN') AND symbol = :symbol ORDER BY timestamp ASC")
+    suspend fun openBySymbol(symbol: String): List<TradeEntity>
+
     @Query("UPDATE trades SET exchangeOrderId = :orderId, slOrderId = :slOrderId, tpOrderId = :tpOrderId, status = :status WHERE id = :id")
     suspend fun updateExchangeProtection(id: Long, orderId: String, slOrderId: String, tpOrderId: String, status: String)
+
+    @Query("UPDATE trades SET positionId = :positionId, entry = :entry, actualEntry = :actualEntry, quantity = :quantity, filledQuantity = :filledQuantity, stopLoss = :stopLoss, takeProfit = :takeProfit, protectionStatus = :protectionStatus, lastExchangeSync = :syncAt, currentPrice = :currentPrice, unrealizedPnl = :unrealizedPnl, pnl = :unrealizedPnl, status = :status WHERE id = :id")
+    suspend fun updateExchangeState(id: Long, positionId: String, entry: Double, actualEntry: Double?, quantity: Double, filledQuantity: Double, stopLoss: Double?, takeProfit: Double?, protectionStatus: String, syncAt: Long, currentPrice: Double, unrealizedPnl: Double, status: String)
+
+    @Query("UPDATE trades SET status = 'UNKNOWN', lastExchangeSync = :syncAt WHERE status = 'EXIT_PENDING'")
+    suspend fun markPendingUnknown(syncAt: Long)
 
     @Query("UPDATE trades SET exit = :exit, pnl = :pnl, status = 'CLOSED', exitReason = :reason WHERE id = :id")
     suspend fun closeTrade(id: Long, exit: Double, pnl: Double, reason: String)

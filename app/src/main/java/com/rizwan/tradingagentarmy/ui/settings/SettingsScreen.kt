@@ -378,6 +378,24 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                SectionCard(
+                    step = "R",
+                    title = "Risk & execution guardrails",
+                    subtitle = "Ye limits har AI/HFT entry se pehle apply hoti hain. Values USD/basis-points mein hain."
+                ) {
+                    PlainField("Maximum daily loss (USD)", s.maxDailyLossUsd) { v -> vm.update { it.copy(maxDailyLossUsd = v) } }
+                    PlainField("Maximum trade size (USD)", s.maxTradeUsd) { v -> vm.update { it.copy(maxTradeUsd = v) } }
+                    PlainField("HFT maximum spread (bps)", s.hftMaxSpreadBps) { v -> vm.update { it.copy(hftMaxSpreadBps = v) } }
+                    PlainField("HFT slippage budget (bps)", s.hftMaxSlippageBps) { v -> vm.update { it.copy(hftMaxSlippageBps = v) } }
+                    PlainField("HFT round-trip fee (bps)", s.hftFeeBps) { v -> vm.update { it.copy(hftFeeBps = v) } }
+                    PlainField("Cooldown seconds", s.hftCooldownSec) { v -> vm.update { it.copy(hftCooldownSec = v) } }
+                    PlainField("Poll milliseconds", s.hftPollMs) { v -> vm.update { it.copy(hftPollMs = v) } }
+                    Text(
+                        "For Gold CFD, HFT entry is blocked when spread exceeds the limit or expected edge cannot cover spread + slippage + fees.",
+                        color = Tokens.TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
             if (settingsTab == 5) {
             SectionCard(

@@ -10,9 +10,11 @@ Production Android client for the TradingAgentArmy fleet (package `com.rizwan.tr
 - **Dashboard** — live market tickers (Binance/Bybit/Bitget public data), bot P&L, WS connection state.
 - **Bots** — fleet list with Demo→Live gates (Gate 1 backtest / Gate 2 paper 72h / Gate 3 micro live), bot detail with trade history + cumulative P&L chart, force‑deploy behind CONFIRM.
 - **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents chat in a War Room, read the trade DB (past results), search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications.
-- **⚡ HFT Scalper** — fast loop (2s ticks, EMA 9/21 cross + RSI) with risk guards, paper by default.
-- **🏦 Bitget** — HMAC v2 Spot/Futures orders with deterministic client IDs, exchange-side preset TP/SL, duplicate guards and a restart watchdog. PAPER remains the default.
+- **⚡ HFT Scalper** — fast mobile scalper (configurable polling, EMA 9/21 + RSI) with persistent Room positions, spread/slippage/fee gates, cooldown and paper-by-default safety. This is not colocated institutional HFT.
+- **🏦 Bitget** — HMAC Spot/Futures orders with deterministic local client IDs, exchange-side preset TP/SL, duplicate guards and startup reconciliation hooks. PAPER remains the default.
 - **🪙 Bitget CFD/MT5 account** — XAUUSD/EURUSD-style symbols route through Bitget's direct CFD Open API with exchange-side TP/SL and position queries. No separate server or MT5 terminal is required for this app path.
+- **📡 CFD market data** — configured Bitget CFD accounts use `/api/v3/cfd/market/tickers` for bid/ask prices and `/api/v3/cfd/market/history-candlestick` for Gold/Forex candles; public fallback data is used only when CFD credentials are not configured.
+- **📈 Trading chart** — bundled Lightweight Charts WebView with candlesticks, EMA, RSI, volume view and 1m/5m/15m/1h/1D controls. CFD 5m candles are client-aggregated from 1m data because Bitget's CFD candle API does not expose every crypto interval.
 - **📱 On-device model** — select a Gemma `.task` file (Settings → Local Model) and chat/agents run fully offline via MediaPipe.
 - **Settings** — tabbed: AI Keys / Local Model / Exchange / Backend / Army / Look. Auto-save on typing. encrypted exchange API keys (Bitget / Binance / Bybit / MT5) with connection tests, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
 - **Notifications** — trade alerts, bot crash, circuit breaker, daily P&L summary (WorkManager, on‑demand init).
@@ -65,6 +67,19 @@ Without the secret the app still builds and runs — Firebase features stay dorm
 Live Army entries require a non-HOLD plan with both SL and TP. Bitget Spot/Futures opening orders send exchange-side protection fields, and the app persists an OPEN trade with a deterministic `clientOid`. A foreground watchdog checks local open trades after restart and can issue a secondary exit for a kill-switch or local SL/TP hit. Exchange-side protection is primary; this is not a guarantee against exchange outages, slippage, rejected orders or network failure. Use API keys without withdrawal permission and validate on a demo/small account first.
 
 For Bitget CFD/MT5, create the CFD account in Bitget first, then create API keys with UTA trade/read permission. The account's CFD mode determines the symbol suffix (`XAUUSD`, `XAUUSD.s`, or `XAUUSD.pro`); configure the matching symbol in the app.
+
+## Current live-trading boundaries
+
+The app is a controlled trading client, not a risk-free autonomous trading guarantee. CFD reconciliation now reads Bitget positions, stores `positionId`, verifies quantity/entry/TP/SL where the exchange returns them, recovers missing local rows, retries `EXIT_PENDING`/`UNKNOWN` rows, and closes an individual CFD position with `positionId + qty`. A symbol-wide CFD close-all request is intentionally not used for normal exits.
+
+Before unattended live use, these operational requirements still apply:
+
+- Android battery optimisation and OEM background restrictions must be disabled for the foreground Army service; Android cannot guarantee an app runs forever after force-stop, reboot, OS kill or network loss.
+- The HFT loop is mobile REST/quote polling, not exchange-colocated millisecond HFT. Spread, slippage budget, fee budget and cooldown gates must be configured for the instrument.
+- Exchange/API permission, symbol precision, CFD mode suffix, actual fills and exchange-side protection must be verified on a demo or very small account first.
+- Never enable withdrawal permission. A failed/unknown exchange response must be treated as requiring manual verification.
+
+The authoritative CFD endpoint details are in [Bitget CFD Trade](https://www.bitget.com/docs/catalog/cfd-trade/cfd-trade) and [Bitget CFD Market](https://www.bitget.com/docs/catalog/cfd-market/cfd-market).
 
 ## Stack
 Kotlin 2.0 · Compose BOM 2024.09 · Material 3 · Hilt · Room · Retrofit/OkHttp/kotlinx‑serialization · WorkManager · Firebase BOM 33 · minSdk 26 / target 35.

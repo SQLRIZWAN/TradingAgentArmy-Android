@@ -50,7 +50,14 @@ data class Trade(
     val status: String = "CLOSED",
     val marketType: String = "SPOT",
     val exitReason: String = "",
-    val quantity: Double = 0.0
+    val quantity: Double = 0.0,
+    val positionId: String = "",
+    val actualEntry: Double? = null,
+    val filledQuantity: Double = 0.0,
+    val protectionStatus: String = "UNKNOWN",
+    val lastExchangeSync: Long = 0L,
+    val currentPrice: Double = 0.0,
+    val unrealizedPnl: Double = 0.0
 )
 
 data class MarketTicker(

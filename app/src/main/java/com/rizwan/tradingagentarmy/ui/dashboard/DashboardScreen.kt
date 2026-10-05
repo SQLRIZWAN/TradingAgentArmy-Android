@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
@@ -46,6 +47,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
 import com.rizwan.tradingagentarmy.ui.theme.AppFonts
@@ -53,6 +55,11 @@ import com.rizwan.tradingagentarmy.ui.theme.Tokens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
@@ -68,6 +75,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
     val chartError by viewModel.chartError.collectAsState()
     val candles by viewModel.candles.collectAsState()
     val chartLoading by viewModel.chartLoading.collectAsState()
+    val timeframe by viewModel.timeframe.collectAsState()
     val liveTrading by viewModel.liveTrading.collectAsState()
     val openTrades = trades.filter { it.status.equals("OPEN", true) || it.status.equals("PAPER_OPEN", true) || it.exit == null }
 
@@ -268,7 +276,21 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                                 })
                             }
                         }
-                        Text("15m · Live", style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
+                        Text("Bitget / market feed", style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
+                    }
+                    LazyRow(
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(listOf("1m", "5m", "15m", "1h", "1D")) { frame ->
+                            TextButton(onClick = { viewModel.setTimeframe(frame) }) {
+                                Text(
+                                    frame,
+                                    color = if (timeframe == frame) Tokens.AccentPrimary else Tokens.TextSecondary,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
                     }
                     Box(Modifier.height(240.dp)) {
                         when {
@@ -296,7 +318,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                                     }
                                 }
                             }
-                            else -> CandleChart(candles, Modifier.fillMaxSize())
+                            else -> LightweightChart(candles, Modifier.fillMaxSize())
                         }
                     }
                 }
@@ -327,7 +349,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                 )
             }
         } else {
-            items(openTrades, key = { "open-${it.id}" }) { t -> OpenPositionCard(t) }
+            items(openTrades, key = { "open-${it.id}" }) { t -> OpenPositionCard(t) { viewModel.closePosition(t.id) } }
         }
 
         // ---- recent trades ----
@@ -384,8 +406,46 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Trade) {
-    val positive = trade.pnl >= 0
+private fun LightweightChart(candles: List<Candle>, modifier: Modifier = Modifier) {
+    val payload = remember(candles) {
+        JSONArray().apply {
+            candles.forEach { c ->
+                put(JSONObject().apply {
+                    put("ts", c.ts)
+                    put("o", c.o)
+                    put("h", c.h)
+                    put("l", c.l)
+                    put("c", c.c)
+                    put("v", c.volume)
+                })
+            }
+        }.toString()
+    }
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                webViewClient = WebViewClient()
+                setBackgroundColor(android.graphics.Color.rgb(16, 23, 34))
+                loadUrl("file:///android_asset/trading_chart.html")
+            }
+        },
+        update = { webView ->
+            webView.post {
+                runCatching { webView.evaluateJavascript("setBars($payload);", null) }
+            }
+        }
+    )
+}
+
+@Composable
+private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Trade, onClose: () -> Unit) {
+    val displayPnl = if (trade.unrealizedPnl != 0.0) trade.unrealizedPnl else trade.pnl
+    val positive = displayPnl >= 0
+    var confirmClose by remember { mutableStateOf(false) }
     Surface(
         color = Tokens.Surface,
         shape = RoundedCornerShape(12.dp),
@@ -406,14 +466,18 @@ private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Tra
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
                 )
                 Text(
-                    (if (positive) "+" else "") + "%.2f".format(trade.pnl),
+                    (if (positive) "+" else "") + "%.2f".format(displayPnl),
                     color = if (positive) Tokens.AccentPrimary else Tokens.AccentDanger,
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = AppFonts.Mono)
                 )
+                TextButton(onClick = { confirmClose = true }) {
+                    Text("Close", color = Tokens.AccentDanger, style = MaterialTheme.typography.labelSmall)
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 MiniValue("Qty", if (trade.quantity > 0) "%.4f".format(trade.quantity) else "—")
                 MiniValue("Entry", "%.4f".format(trade.entry))
+                MiniValue("Current", if (trade.currentPrice > 0) "%.4f".format(trade.currentPrice) else "—")
                 MiniValue("SL", trade.stopLoss?.let { "%.4f".format(it) } ?: "—", Tokens.AccentDanger)
                 MiniValue("TP", trade.takeProfit?.let { "%.4f".format(it) } ?: "—", Tokens.AccentPrimary)
             }
@@ -424,6 +488,19 @@ private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Tra
                 style = MaterialTheme.typography.labelSmall
             )
         }
+    }
+    if (confirmClose) {
+        AlertDialog(
+            onDismissRequest = { confirmClose = false },
+            title = { Text("Close ${trade.symbol} position?") },
+            text = { Text("A market exit will be sent for this specific position. Check the exchange before confirming.") },
+            confirmButton = {
+                TextButton(onClick = { confirmClose = false; onClose() }) {
+                    Text("Confirm close", color = Tokens.AccentDanger)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("Cancel") } }
+        )
     }
 }
 

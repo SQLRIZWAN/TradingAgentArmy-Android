@@ -61,6 +61,13 @@ data class SettingsUi(
     val roundMinutes: Int = 15,
     val hftEnabled: Boolean = false,
     val liveTrading: Boolean = false,
+    val maxDailyLossUsd: String = "50",
+    val maxTradeUsd: String = "25",
+    val hftMaxSpreadBps: String = "20",
+    val hftMaxSlippageBps: String = "10",
+    val hftFeeBps: String = "5",
+    val hftCooldownSec: String = "30",
+    val hftPollMs: String = "2000",
     val notifyTrades: Boolean = true,
     val notifyCrash: Boolean = true,
     val notifyDaily: Boolean = true,
@@ -128,6 +135,13 @@ class SettingsViewModel @Inject constructor(
             roundMinutes = prefs.getInt("army_round_minutes", 15),
             hftEnabled = prefs.getBool("hft_enabled", false),
             liveTrading = prefs.getBool("live_trading", false),
+            maxDailyLossUsd = prefs.getString("risk_max_daily_loss", "50"),
+            maxTradeUsd = prefs.getString("risk_max_trade", "25"),
+            hftMaxSpreadBps = prefs.getString("hft_max_spread_bps", "20"),
+            hftMaxSlippageBps = prefs.getString("hft_max_slippage_bps", "10"),
+            hftFeeBps = prefs.getString("hft_fee_bps", "5"),
+            hftCooldownSec = prefs.getInt("hft_cooldown_sec", 30).toString(),
+            hftPollMs = prefs.getInt("hft_poll_ms", 2000).toString(),
             notifyTrades = prefs.notifyTrades,
             notifyCrash = prefs.notifyCrash,
             notifyDaily = prefs.notifyDaily,
@@ -276,6 +290,13 @@ class SettingsViewModel @Inject constructor(
         prefs.putInt("army_round_minutes", s.roundMinutes)
         prefs.putBool("hft_enabled", s.hftEnabled)
         prefs.putBool("live_trading", s.liveTrading)
+        prefs.putString("risk_max_daily_loss", s.maxDailyLossUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "50")
+        prefs.putString("risk_max_trade", s.maxTradeUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "25")
+        prefs.putString("hft_max_spread_bps", s.hftMaxSpreadBps.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "20")
+        prefs.putString("hft_max_slippage_bps", s.hftMaxSlippageBps.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "10")
+        prefs.putString("hft_fee_bps", s.hftFeeBps.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "5")
+        prefs.putInt("hft_cooldown_sec", s.hftCooldownSec.toIntOrNull()?.coerceIn(1, 3600) ?: 30)
+        prefs.putInt("hft_poll_ms", s.hftPollMs.toIntOrNull()?.coerceIn(250, 10_000) ?: 2000)
         prefs.notifyTrades = s.notifyTrades
         prefs.notifyCrash = s.notifyCrash
         prefs.notifyDaily = s.notifyDaily

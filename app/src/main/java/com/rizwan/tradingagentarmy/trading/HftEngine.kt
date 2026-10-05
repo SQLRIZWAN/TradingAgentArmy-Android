@@ -44,6 +44,10 @@ class HftEngine @Inject constructor(
 
     private var posSide = ""
     private var posEntry = 0.0
+    private var posQty = 0.0
+    private var posSymbol = ""
+    private var posPositionId = ""
+    private var localTradeId = 0L
     private var lastTradeAt = 0L
 
     fun start() {
@@ -52,6 +56,7 @@ class HftEngine @Inject constructor(
         AppEvents.record("hft", "engine started")
         job = scope.launch {
             val symbol = prefs.getString("army_symbol", "BTCUSDT").uppercase()
+            restorePosition(symbol)
             val closes = ArrayDeque<Double>()
             while (isActive) {
                 runCatching {
@@ -69,9 +74,24 @@ class HftEngine @Inject constructor(
                         }
                     }
                 }
-                delay(2000L)
+                delay(prefs.getInt("hft_poll_ms", 2000).coerceIn(250, 10_000).toLong())
             }
         }
+    }
+
+    private suspend fun restorePosition(symbol: String) {
+        val saved = tradeDao.openTrades().firstOrNull {
+            it.botName == "HFT Scalper" && it.symbol.equals(symbol, true)
+        } ?: return
+        posSide = saved.side.uppercase()
+        posEntry = saved.actualEntry ?: saved.entry
+        posQty = saved.quantity
+        posSymbol = saved.symbol
+        posPositionId = saved.positionId
+        localTradeId = saved.id
+        lastTradeAt = saved.timestamp
+        _position.value = "$posSide @ ${"%.2f".format(posEntry)} · restored"
+        AppEvents.record("hft", "restored position ${saved.symbol} ${saved.positionId}")
     }
 
     fun stop() {
@@ -127,6 +147,27 @@ class HftEngine @Inject constructor(
         }
         val stop = if (side == "LONG") price * 0.9985 else price * 1.0015
         val take = if (side == "LONG") price * 1.0015 else price * 0.9985
+        var resultOrderId = ""
+        if (marketType == "CFD") {
+            val quote = bitget.cfdQuote(symbol).getOrElse {
+                _lastSignal.value = "BLOCKED: CFD quote unavailable"
+                return
+            }
+            val spreadBps = ((quote.ask - quote.bid) / ((quote.ask + quote.bid) / 2.0)) * 10_000.0
+            val maxSpread = prefs.getString("hft_max_spread_bps", "20").toDoubleOrNull() ?: 20.0
+            val slippageBps = prefs.getString("hft_max_slippage_bps", "10").toDoubleOrNull() ?: 10.0
+            val feeBps = prefs.getString("hft_fee_bps", "5").toDoubleOrNull() ?: 5.0
+            val cooldown = (prefs.getInt("hft_cooldown_sec", 30) * 1000L).coerceAtLeast(1_000L)
+            if (spreadBps > maxSpread) {
+                _lastSignal.value = "BLOCKED: spread ${"%.1f".format(spreadBps)}bps > ${"%.1f".format(maxSpread)}bps"
+                return
+            }
+            if (15.0 < spreadBps + slippageBps + (feeBps * 2.0)) {
+                _lastSignal.value = "BLOCKED: edge below spread/slippage/fees"
+                return
+            }
+            if (now - lastTradeAt < cooldown) return
+        }
         if (live) {
             val result = bitget.placeProtected(
                 marketType, symbol, if (side == "LONG") "buy" else "sell", size, price,
@@ -137,10 +178,52 @@ class HftEngine @Inject constructor(
                 AppEvents.record("hft", "live entry failed: ${result.message}")
                 return
             }
+            resultOrderId = result.orderId
         }
         lastTradeAt = now
         posSide = side
         posEntry = price
+        posQty = size / price
+        posSymbol = symbol
+        posPositionId = ""
+        val insertedId = tradeDao.insert(
+            TradeEntity(
+                symbol = symbol,
+                side = side,
+                entry = price,
+                exit = null,
+                pnl = 0.0,
+                mode = if (live) "hft-live" else "hft-paper",
+                botName = "HFT Scalper",
+                model = "ema-rsi",
+                timestamp = now,
+                clientOid = "hft_${symbol}_${now}",
+                exchangeOrderId = if (live) resultOrderId else "",
+                stopLoss = stop,
+                takeProfit = take,
+                status = if (live) "OPEN" else "PAPER_OPEN",
+                marketType = marketType,
+                quantity = posQty,
+                actualEntry = price,
+                filledQuantity = posQty,
+                protectionStatus = if (live) "SUBMITTED" else "PAPER"
+            )
+        )
+        localTradeId = insertedId
+        if (live && marketType == "CFD") {
+            val remote = bitget.cfdPositionList(symbol).getOrDefault(emptyList())
+                .lastOrNull { it.side.equals(if (side == "LONG") "BUY" else "SELL", true) }?.positionId.orEmpty()
+            posPositionId = remote
+            if (posPositionId.isNotBlank()) {
+                val verified = bitget.cfdPositionList(symbol).getOrDefault(emptyList())
+                    .firstOrNull { it.positionId == posPositionId }
+                if (verified != null) {
+                    posEntry = verified.openPrice
+                    posQty = verified.quantity
+                    tradeDao.updateExchangeState(insertedId, posPositionId, verified.openPrice, verified.openPrice, verified.quantity, verified.quantity, verified.stopLoss, verified.takeProfit, "VERIFIED", now, verified.openPrice, verified.totalProfit, "OPEN")
+                }
+            }
+        }
         _position.value = "$side @ ${"%.2f".format(price)}"
         _lastSignal.value = "$side entry RSI=${"%.0f".format(rsi)}"
         AppEvents.record("hft", "$side $symbol @ $price size=$size")
@@ -154,7 +237,11 @@ class HftEngine @Inject constructor(
         if (prefs.getBool("live_trading", false)) {
             val qty = notional / entry
             val result = if (marketType == "CFD") {
-                bitget.closeCfd(prefs.getString("army_symbol", "XAUUSD"))
+                val positionId = posPositionId.ifBlank {
+                    bitget.cfdPositionList(posSymbol).getOrDefault(emptyList())
+                        .firstOrNull { it.side.equals(if (side == "LONG") "BUY" else "SELL", true) }?.positionId.orEmpty()
+                }
+                bitget.closeCfdPosition(positionId, if (posQty > 0) posQty else qty)
             } else if (marketType == "FUTURES") {
                 bitget.closeFuturesMarket(prefs.getString("army_symbol", "BTCUSDT"), if (side == "LONG") "sell" else "buy", "%.8f".format(qty), "hft_exit_${System.currentTimeMillis()}")
             } else {
@@ -167,27 +254,34 @@ class HftEngine @Inject constructor(
             }
         }
         val pnl = (if (side == "LONG") price - entry else entry - price) * notional / entry
-        tradeDao.insert(
-            TradeEntity(
-                symbol = prefs.getString("army_symbol", "BTCUSDT"), side = side,
-                entry = entry, exit = price, pnl = pnl, mode = "hft-paper",
-                botName = "HFT Scalper", model = "ema-cross", timestamp = System.currentTimeMillis()
-            )
-        )
+        if (localTradeId > 0L) tradeDao.closeTrade(localTradeId, price, pnl, reason)
         AppEvents.record("hft", "closed $side @ $price ($reason) pnl=${"%.2f".format(pnl)}")
         Notifier.post(context, "agent_army", "⚡ HFT closed $side ($reason)",
             "PnL: ${if (pnl >= 0) "+" else ""}${"%.2f".format(pnl)} USD")
         posSide = ""
         posEntry = 0.0
+        posQty = 0.0
+        posSymbol = ""
+        posPositionId = ""
+        localTradeId = 0L
         _position.value = "FLAT"
     }
 
-    private fun lastPrice(symbol: String): Double = runCatching {
+    private suspend fun lastPrice(symbol: String): Double {
+        if (isCfdSymbol(symbol)) return bitget.cfdPrice(symbol).getOrDefault(0.0)
+        return runCatching {
         val body = http.newCall(
             Request.Builder().url("https://api.binance.com/api/v3/ticker/price?symbol=${symbol.uppercase()}").build()
         ).execute().use { it.body?.string().orEmpty() }
         Regex("\"price\":\"([0-9.]+)\"").find(body)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
-    }.getOrDefault(0.0)
+        }.getOrDefault(0.0)
+    }
+
+    private fun isCfdSymbol(symbol: String): Boolean = symbol.uppercase().replace("/", "") in setOf(
+        "XAUUSD", "XAUUSD.S", "XAUUSD.PRO", "XAGUSD", "XAGUSD.S", "XAGUSD.PRO",
+        "EURUSD", "EURUSD.S", "EURUSD.PRO", "GBPUSD", "GBPUSD.S", "GBPUSD.PRO",
+        "USDJPY", "USDJPY.S", "USDJPY.PRO", "AUDUSD", "USDCAD", "USDCHF"
+    )
 
     private fun ema(vals: List<Double>, period: Int): Double {
         val k = 2.0 / (period + 1)

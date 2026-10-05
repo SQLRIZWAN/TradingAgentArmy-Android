@@ -53,6 +53,23 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE trades ADD COLUMN positionId TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE trades ADD COLUMN actualEntry REAL")
+            db.execSQL("ALTER TABLE trades ADD COLUMN filledQuantity REAL NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE trades ADD COLUMN protectionStatus TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            db.execSQL("ALTER TABLE trades ADD COLUMN lastExchangeSync INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    private val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE trades ADD COLUMN currentPrice REAL NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE trades ADD COLUMN unrealizedPnl REAL NOT NULL DEFAULT 0")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDb(@ApplicationContext context: Context): AppDatabase =
@@ -60,6 +77,8 @@ object DatabaseModule {
             .addMigrations(MIGRATION_1_2)
             .addMigrations(MIGRATION_2_3)
             .addMigrations(MIGRATION_3_4)
+            .addMigrations(MIGRATION_4_5)
+            .addMigrations(MIGRATION_5_6)
             .fallbackToDestructiveMigration()
             .build()
 

@@ -2,6 +2,7 @@ package com.rizwan.tradingagentarmy.agents
 
 import com.rizwan.tradingagentarmy.data.local.TradeDao
 import com.rizwan.tradingagentarmy.data.remote.MarketApi
+import com.rizwan.tradingagentarmy.trading.BitgetClient
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,7 +16,8 @@ import javax.inject.Singleton
 @Singleton
 class AgentTools @Inject constructor(
     private val marketApi: MarketApi,
-    private val tradeDao: TradeDao
+    private val tradeDao: TradeDao,
+    private val bitget: BitgetClient
 ) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
@@ -63,6 +65,16 @@ class AgentTools @Inject constructor(
 
     suspend fun klines(symbol: String, interval: String = "1h", limit: Int = 48): String =
         withContext(Dispatchers.IO) {
+            if (isCfdSymbol(symbol)) {
+                val candles = bitget.cfdCandles(
+                    symbol = symbol.replace("/", "").uppercase(),
+                    interval = interval,
+                    limit = limit.coerceAtMost(100)
+                ).getOrElse { return@withContext "CFD CANDLE DATA FAILED: ${it.message}" }
+                return@withContext candles.joinToString("\n") {
+                    "T=${it.ts} O=${it.open} H=${it.high} L=${it.low} C=${it.close}"
+                }.ifBlank { "NO CFD CANDLE DATA" }
+            }
             runCatching {
                 val sym = symbol.lowercase().replace("/", "")
                 val url = "https://api.binance.com/api/v3/klines?symbol=${sym.uppercase()}&interval=$interval&limit=$limit"
@@ -78,6 +90,9 @@ class AgentTools @Inject constructor(
         }
 
     suspend fun lastPrice(symbol: String): Double = withContext(Dispatchers.IO) {
+        if (isCfdSymbol(symbol)) {
+            return@withContext bitget.cfdPrice(symbol.replace("/", "")).getOrDefault(0.0)
+        }
         runCatching {
             val sym = symbol.replace("/", "").uppercase()
             val body = http.newCall(
@@ -86,6 +101,13 @@ class AgentTools @Inject constructor(
             Regex("\"price\":\"([0-9.]+)\"").find(body)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
         }.getOrDefault(0.0)
     }
+
+    fun isCfdSymbol(symbol: String): Boolean =
+        symbol.uppercase().replace("/", "") in setOf(
+            "XAUUSD", "XAUUSD.S", "XAUUSD.PRO", "XAGUSD", "XAGUSD.S", "XAGUSD.PRO",
+            "EURUSD", "EURUSD.S", "EURUSD.PRO", "GBPUSD", "GBPUSD.S", "GBPUSD.PRO",
+            "USDJPY", "USDJPY.S", "USDJPY.PRO", "AUDUSD", "AUDUSD.S", "USDCAD", "USDCHF"
+        )
 
     suspend fun pastTradesSummary(): String = runCatching {
         val trades = tradeDao.all()

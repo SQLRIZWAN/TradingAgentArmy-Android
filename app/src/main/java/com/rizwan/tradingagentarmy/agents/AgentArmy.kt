@@ -268,7 +268,7 @@ $appLog
             }
             exchangeOrderId = res.orderId
         }
-        tradeDao.insert(
+        val localTradeId = tradeDao.insert(
             TradeEntity(
                 symbol = plan.symbol, side = plan.action, entry = price, exit = null,
                 pnl = 0.0, mode = if (isLive) "live" else "paper",
@@ -280,6 +280,27 @@ $appLog
                 quantity = if (price > 0.0) size / price else 0.0
             )
         )
+        if (isLive && marketType == "CFD") {
+            val remote = bitget.cfdPositionList(plan.symbol).getOrDefault(emptyList())
+                .lastOrNull { it.symbol.equals(plan.symbol, true) && it.side.equals(if (plan.action == "BUY") "BUY" else "SELL", true) }
+            if (remote != null) {
+                tradeDao.updateExchangeState(
+                    localTradeId,
+                    remote.positionId,
+                    remote.openPrice,
+                    remote.openPrice,
+                    remote.quantity,
+                    remote.quantity,
+                    remote.stopLoss,
+                    remote.takeProfit,
+                    if (remote.stopLoss != null && remote.takeProfit != null) "VERIFIED" else "MISSING",
+                    System.currentTimeMillis(),
+                    remote.openPrice,
+                    remote.totalProfit,
+                    "OPEN"
+                )
+            }
+        }
         val mode = if (isLive) "LIVE" else "PAPER"
         post(
             AgentRole.TRADER,

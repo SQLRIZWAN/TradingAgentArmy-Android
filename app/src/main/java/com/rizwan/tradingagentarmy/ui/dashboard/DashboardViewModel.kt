@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rizwan.tradingagentarmy.data.local.SecurePreferences
+import com.rizwan.tradingagentarmy.data.local.TradeDao
 import com.rizwan.tradingagentarmy.data.remote.WebSocketManager
 import com.rizwan.tradingagentarmy.data.repository.BotRepository
 import com.rizwan.tradingagentarmy.data.repository.MarketRepository
@@ -12,6 +13,7 @@ import com.rizwan.tradingagentarmy.domain.model.PortfolioSummary
 import com.rizwan.tradingagentarmy.domain.model.Trade
 import com.rizwan.tradingagentarmy.domain.model.WsEvent
 import com.rizwan.tradingagentarmy.notifications.Notifier
+import com.rizwan.tradingagentarmy.trading.BitgetClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -34,8 +36,10 @@ class DashboardViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val marketRepo: MarketRepository,
     private val botRepo: BotRepository,
+    private val tradeDao: TradeDao,
     private val prefs: SecurePreferences,
-    private val ws: WebSocketManager
+    private val ws: WebSocketManager,
+    private val bitget: BitgetClient
 ) : ViewModel() {
 
     private val _tickers = MutableStateFlow<List<MarketTicker>>(emptyList())
@@ -77,6 +81,9 @@ class DashboardViewModel @Inject constructor(
     private val _chartLoading = MutableStateFlow(false)
     val chartLoading: StateFlow<Boolean> = _chartLoading.asStateFlow()
 
+    private val _timeframe = MutableStateFlow("15m")
+    val timeframe: StateFlow<String> = _timeframe.asStateFlow()
+
     private val chartHttp by lazy {
         okhttp3.OkHttpClient.Builder()
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
@@ -85,6 +92,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     private var poller: Job? = null
+    private var lastCandleFetch = 0L
 
     init {
         ws.connect()
@@ -101,7 +109,59 @@ class DashboardViewModel @Inject constructor(
         loadCandles()
     }
 
+    fun setTimeframe(value: String) {
+        if (_timeframe.value == value) return
+        _timeframe.value = value
+        loadCandles()
+    }
+
     fun onChartError() { _chartError.value = true }
+
+    fun closePosition(id: Long) {
+        viewModelScope.launch {
+            val trade = tradeDao.all().firstOrNull { it.id == id } ?: return@launch
+            val price = if (trade.marketType == "CFD") {
+                bitget.cfdPrice(trade.symbol, if (trade.side == "BUY") "sell" else "buy").getOrDefault(0.0)
+            } else toolsLastPrice(trade.symbol)
+            if (price <= 0.0) return@launch
+            val live = trade.mode.equals("live", true) || trade.mode.equals("hft-live", true)
+            val result = if (!live) true else runCatching {
+                when (trade.marketType) {
+                    "CFD" -> {
+                        val positionId = trade.positionId.ifBlank {
+                            bitget.cfdPositionList(trade.symbol).getOrDefault(emptyList())
+                                .firstOrNull { it.symbol.equals(trade.symbol, true) }?.positionId.orEmpty()
+                        }
+                        bitget.closeCfdPosition(positionId, trade.quantity).ok
+                    }
+                    "FUTURES" -> bitget.closeFuturesMarket(
+                        trade.symbol,
+                        if (trade.side == "BUY") "sell" else "buy",
+                        "%.8f".format(trade.quantity),
+                        "manual_exit_${trade.id}_${System.currentTimeMillis()}"
+                    ).ok
+                    else -> bitget.closeSpotMarket(
+                        trade.symbol, "sell", trade.quantity,
+                        "manual_exit_${trade.id}_${System.currentTimeMillis()}"
+                    ).ok
+                }
+            }.getOrDefault(false)
+            if (result) {
+                val pnl = if (trade.side == "BUY") (price - trade.entry) * trade.quantity else (trade.entry - price) * trade.quantity
+                tradeDao.closeTrade(trade.id, price, pnl, "MANUAL_CLOSE")
+                refresh()
+            }
+        }
+    }
+
+    private suspend fun toolsLastPrice(symbol: String): Double =
+        if (isCfdSymbol(symbol)) bitget.cfdPrice(symbol).getOrDefault(0.0)
+        else runCatching {
+            val body = okhttp3.OkHttpClient().newCall(
+                okhttp3.Request.Builder().url("https://api.binance.com/api/v3/ticker/price?symbol=${symbol.replace("/", "").uppercase()}").build()
+            ).execute().use { it.body?.string().orEmpty() }
+            Regex("\"price\":\"([0-9.]+)\"").find(body)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        }.getOrDefault(0.0)
 
     fun loadCandles() {
         viewModelScope.launch {
@@ -122,7 +182,18 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    private fun fetchCandles(sym: String): List<Candle> {
+    private suspend fun fetchCandles(sym: String): List<Candle> {
+        if (isCfdSymbol(sym)) {
+            val requested = _timeframe.value
+            val apiInterval = if (requested == "5m") "1m" else requested.lowercase()
+            val raw = bitget.cfdCandles(
+                symbol = sym.replace("/", "").uppercase(),
+                interval = apiInterval,
+                side = "buy",
+                limit = 100
+            ).getOrThrow().map { Candle(it.ts, it.open.toFloat(), it.high.toFloat(), it.low.toFloat(), it.close.toFloat(), 0f) }
+            return raw.aggregate(requested)
+        }
         val binancePair = when (sym) {
             "BTC/USDT" -> "BTCUSDT"
             "ETH/USDT" -> "ETHUSDT"
@@ -130,7 +201,7 @@ class DashboardViewModel @Inject constructor(
             else -> null
         }
         val url = if (binancePair != null) {
-            "https://api.binance.com/api/v3/klines?symbol=$binancePair&interval=15m&limit=96"
+            "https://api.binance.com/api/v3/klines?symbol=$binancePair&interval=${_timeframe.value.lowercase()}&limit=96"
         } else {
             val yahooSym = when (sym) {
                 "XAUUSD" -> "GC=F"
@@ -138,7 +209,7 @@ class DashboardViewModel @Inject constructor(
                 "GBPUSD" -> "GBPUSD=X"
                 else -> "GC=F"
             }
-            "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSym?interval=15m&range=6h"
+            "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSym?interval=${if (_timeframe.value == "1D") "1d" else "15m"}&range=${if (_timeframe.value == "1D") "1y" else "6h"}"
         }
         val req = okhttp3.Request.Builder()
             .url(url)
@@ -153,10 +224,12 @@ class DashboardViewModel @Inject constructor(
                 return arr.mapNotNull { row ->
                     val a = row.jsonArray
                     Candle(
+                        ts = a[0].jsonPrimitive.content.toLongOrNull() ?: 0L,
                         o = a[1].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
                         h = a[2].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
                         l = a[3].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
-                        c = a[4].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null
+                        c = a[4].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
+                        volume = a[5].jsonPrimitive.content.toFloatOrNull() ?: 0f
                     )
                 }
             } else {
@@ -178,9 +251,31 @@ class DashboardViewModel @Inject constructor(
                     val h = highs.getOrNull(i) ?: return@mapNotNull null
                     val l = lows.getOrNull(i) ?: return@mapNotNull null
                     val c = closes.getOrNull(i) ?: return@mapNotNull null
-                    Candle(o.toFloat(), h.toFloat(), l.toFloat(), c.toFloat())
+                    Candle(0L, o.toFloat(), h.toFloat(), l.toFloat(), c.toFloat(), 0f)
                 }
             }
+        }
+    }
+
+    private fun isCfdSymbol(symbol: String): Boolean =
+        symbol.uppercase().replace("/", "") in setOf(
+            "XAUUSD", "XAUUSD.S", "XAUUSD.PRO", "XAGUSD", "XAGUSD.S", "XAGUSD.PRO",
+            "EURUSD", "EURUSD.S", "EURUSD.PRO", "GBPUSD", "GBPUSD.S", "GBPUSD.PRO",
+            "USDJPY", "USDJPY.S", "USDJPY.PRO", "AUDUSD", "USDCAD", "USDCHF"
+        )
+
+    private fun List<Candle>.aggregate(timeframe: String): List<Candle> {
+        if (timeframe != "5m" || size < 2) return this
+        val bucket = 5L * 60_000L
+        return groupBy { (it.ts / bucket) * bucket }.toSortedMap().values.map { group ->
+            Candle(
+                ts = group.first().ts,
+                o = group.first().o,
+                h = group.maxOf { it.h },
+                l = group.minOf { it.l },
+                c = group.last().c,
+                volume = group.sumOf { it.volume.toDouble() }.toFloat()
+            )
         }
     }
 
@@ -215,6 +310,11 @@ class DashboardViewModel @Inject constructor(
         runCatching { _trades.value = botRepo.allTrades().take(10) }
         _backendAlive.value = marketRepo.backendAlive()
         _lastSync.value = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        if (now - lastCandleFetch >= (prefs.refreshInterval.coerceIn(5, 60) * 1000L)) {
+            lastCandleFetch = now
+            loadCandles()
+        }
     }
 
     private fun handle(event: WsEvent) {
@@ -269,4 +369,4 @@ class DashboardViewModel @Inject constructor(
 
 }
 
-data class Candle(val o: Float, val h: Float, val l: Float, val c: Float)
+data class Candle(val ts: Long = 0L, val o: Float, val h: Float, val l: Float, val c: Float, val volume: Float = 0f)

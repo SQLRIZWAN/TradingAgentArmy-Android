@@ -132,6 +132,9 @@ class BotRepository @Inject constructor(
         stopLoss = e.stopLoss, takeProfit = e.takeProfit,
         slOrderId = e.slOrderId, tpOrderId = e.tpOrderId,
         status = e.status, marketType = e.marketType, exitReason = e.exitReason,
-        quantity = e.quantity
+        quantity = e.quantity, positionId = e.positionId, actualEntry = e.actualEntry,
+        filledQuantity = e.filledQuantity, protectionStatus = e.protectionStatus,
+        lastExchangeSync = e.lastExchangeSync, currentPrice = e.currentPrice,
+        unrealizedPnl = e.unrealizedPnl
     )
 }
