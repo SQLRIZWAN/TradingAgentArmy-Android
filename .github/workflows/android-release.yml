@@ -99,7 +99,9 @@ jobs:
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest-build' }}
           name: AI Trading Army v${{ steps.apk.outputs.version }}
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          # Every successful main push should be visible as the current installable APK.
+          prerelease: false
+          make_latest: true
           body: ${{ steps.log.outputs.body }}
           files: dist/*.apk
 
