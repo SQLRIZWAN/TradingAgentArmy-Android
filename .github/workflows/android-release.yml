@@ -32,11 +32,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform 35
-        run: yes | sdkmanager "platforms;android-35" "build-tools;34.0.0" >/dev/null || true
+      - name: Ensure Android platform 35
+        run: |
+          yes | sdkmanager "platforms;android-35" "build-tools;34.0.0" >/dev/null || true
+          sdkmanager --list_installed | grep -E "platforms;android-35|build-tools;34" || true
 
       - name: Decode keystore
         env:
