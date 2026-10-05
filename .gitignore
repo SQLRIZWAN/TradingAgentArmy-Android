@@ -17,3 +17,4 @@ firebase-admin*.json
 google-services.json
 .env
 .env.local
+.kotlin/

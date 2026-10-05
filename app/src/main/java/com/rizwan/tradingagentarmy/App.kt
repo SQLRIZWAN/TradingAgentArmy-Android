@@ -36,6 +36,7 @@ class App : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.rizwan.tradingagentarmy.ui.theme.ThemeController.applyTheme(prefs.themeMode)
         createChannels()
         FirebaseSyncHolder.sync = firebaseSync
         firebaseSync.ensureSignedIn()

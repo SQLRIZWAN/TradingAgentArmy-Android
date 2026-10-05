@@ -21,6 +21,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
@@ -61,6 +65,19 @@ class DashboardViewModel @Inject constructor(
     private val _chartError = MutableStateFlow(false)
     val chartError: StateFlow<Boolean> = _chartError.asStateFlow()
 
+    private val _candles = MutableStateFlow<List<Candle>>(emptyList())
+    val candles: StateFlow<List<Candle>> = _candles.asStateFlow()
+
+    private val _chartLoading = MutableStateFlow(false)
+    val chartLoading: StateFlow<Boolean> = _chartLoading.asStateFlow()
+
+    private val chartHttp by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     private var poller: Job? = null
 
     init {
@@ -69,14 +86,97 @@ class DashboardViewModel @Inject constructor(
             ws.events.collect { handle(it) }
         }
         startPolling()
+        loadCandles()
     }
 
     fun selectSymbol(sym: String) {
+        if (_selected.value == sym) return
         _selected.value = sym
-        _chartError.value = false
+        loadCandles()
     }
 
     fun onChartError() { _chartError.value = true }
+
+    fun loadCandles() {
+        viewModelScope.launch {
+            _chartLoading.value = true
+            _chartError.value = false
+            val result = runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    fetchCandles(_selected.value)
+                }
+            }
+            result.onSuccess { list ->
+                _candles.value = list
+                if (list.isEmpty()) _chartError.value = true
+            }.onFailure {
+                _chartError.value = true
+            }
+            _chartLoading.value = false
+        }
+    }
+
+    private fun fetchCandles(sym: String): List<Candle> {
+        val binancePair = when (sym) {
+            "BTC/USDT" -> "BTCUSDT"
+            "ETH/USDT" -> "ETHUSDT"
+            "SOL/USDT" -> "SOLUSDT"
+            else -> null
+        }
+        val url = if (binancePair != null) {
+            "https://api.binance.com/api/v3/klines?symbol=$binancePair&interval=15m&limit=96"
+        } else {
+            val yahooSym = when (sym) {
+                "XAUUSD" -> "GC=F"
+                "EURUSD" -> "EURUSD=X"
+                "GBPUSD" -> "GBPUSD=X"
+                else -> "GC=F"
+            }
+            "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSym?interval=15m&range=6h"
+        }
+        val req = okhttp3.Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile")
+            .get().build()
+        chartHttp.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            val body = resp.body?.string() ?: throw IllegalStateException("empty")
+            val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+            if (binancePair != null) {
+                val arr = json.parseToJsonElement(body).jsonArray
+                return arr.mapNotNull { row ->
+                    val a = row.jsonArray
+                    Candle(
+                        o = a[1].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
+                        h = a[2].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
+                        l = a[3].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
+                        c = a[4].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null
+                    )
+                }
+            } else {
+                val chart = json.parseToJsonElement(body).jsonObject["chart"]
+                    ?.jsonObject?.get("result")
+                    ?.jsonArray?.firstOrNull()
+                    ?.jsonObject ?: return emptyList()
+                val quote = chart["indicators"]?.jsonObject?.get("quote")
+                    ?.jsonArray?.firstOrNull()
+                    ?.jsonObject ?: return emptyList()
+                fun arrOf(name: String): List<Double?> =
+                    (quote[name] as? JsonArray)?.map {
+                        (it as? JsonPrimitive)?.content?.toDoubleOrNull()
+                    } ?: emptyList()
+                val opens = arrOf("open"); val highs = arrOf("high")
+                val lows = arrOf("low"); val closes = arrOf("close")
+                return opens.indices.mapNotNull { i ->
+                    val o = opens.getOrNull(i) ?: return@mapNotNull null
+                    val h = highs.getOrNull(i) ?: return@mapNotNull null
+                    val l = lows.getOrNull(i) ?: return@mapNotNull null
+                    val c = closes.getOrNull(i) ?: return@mapNotNull null
+                    Candle(o.toFloat(), h.toFloat(), l.toFloat(), c.toFloat())
+                }
+            }
+        }
+    }
 
     private fun startPolling() {
         poller?.cancel()
@@ -160,18 +260,7 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    fun chartUrl(): String = when (val s = _selected.value) {
-        "BTC/USDT" -> tv("BINANCE:BTCUSDT")
-        "ETH/USDT" -> tv("BINANCE:ETHUSDT")
-        "SOL/USDT" -> tv("BINANCE:SOLUSDT")
-        "XAUUSD" -> tv("TVC:GOLD")
-        "EURUSD" -> tv("FX:EURUSD")
-        "GBPUSD" -> tv("FX:GBPUSD")
-        else -> tv("BINANCE:BTCUSDT")
-    }
-
-    private fun tv(symbol: String) =
-        "https://s.tradingview.com/widgetembed/?symbol=" +
-            java.net.URLEncoder.encode(symbol, "UTF-8") +
-            "&interval=15&theme=dark&style=1&locale=en&hide_top_toolbar=0&saveimage=0&withdateranges=1"
 }
+
+data class Candle(val o: Float, val h: Float, val l: Float, val c: Float)
+

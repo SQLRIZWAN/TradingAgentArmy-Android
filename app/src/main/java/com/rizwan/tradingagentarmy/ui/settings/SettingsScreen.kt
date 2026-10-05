@@ -9,18 +9,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -65,17 +66,28 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Settings", color = Tokens.TextPrimary, style = MaterialTheme.typography.titleLarge)
+                    Column {
+                        Text("Settings", color = Tokens.TextPrimary, style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            if (saved) "✓ Saved — ab chat bhej kar check karein" else "Auto-save ON · type karte hi save",
+                            color = if (saved) Tokens.AccentPrimary else Tokens.TextSecondary,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (saved) Text("✅ Saved", color = Tokens.AccentPrimary, style = MaterialTheme.typography.labelMedium)
-                        Button(
-                            onClick = { vm.save() },
-                            modifier = Modifier.padding(start = 8.dp)
-                        ) { Text("Save All") }
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (saved) Tokens.AccentPrimary else Tokens.AccentWarning)
+                        )
+                        OutlinedButton(onClick = { vm.save() }, modifier = Modifier.padding(start = 10.dp)) {
+                            Text("💾 Save Now", color = Tokens.AccentPrimary)
+                        }
                     }
                 }
             }
@@ -86,117 +98,193 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(12.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            // ================= SECTION 1: EXCHANGES =================
-            Section("Exchange API Keys") {
+            // ================= ① AI MODELS =================
+            SectionCard(
+                step = "①",
+                title = "AI Model Keys (Chat ke liye)",
+                subtitle = "Sirf ek key kaafi hai — Gemini best + free. Key daalo, auto-save, bas!"
+            ) {
+                ProviderCard(
+                    name = "Google Gemini  ★ Recommended",
+                    hint = "aistudio.google.com → Get API key",
+                    key = s.geminiKey,
+                    onKey = { v -> vm.update { it.copy(geminiKey = v) } },
+                    model = s.geminiModel,
+                    models = s.geminiModels,
+                    onModel = { v -> vm.update { it.copy(geminiModel = v) } },
+                    testResult = tests["gemini"],
+                    onTest = { vm.testGemini() }
+                )
+                HorizontalDivider(color = Tokens.BorderSubtle)
+
+                ProviderCard(
+                    name = "DeepSeek (sasta + strong)",
+                    hint = "platform.deepseek.com → API keys",
+                    key = s.deepseekKey,
+                    onKey = { v -> vm.update { it.copy(deepseekKey = v) } },
+                    model = s.deepseekModel,
+                    models = SettingsViewModel.DEEPSEEK_MODELS,
+                    onModel = { v -> vm.update { it.copy(deepseekModel = v) } },
+                    testResult = tests["deepseek"],
+                    onTest = { vm.testDeepseek() }
+                )
+                HorizontalDivider(color = Tokens.BorderSubtle)
+
+                ProviderCard(
+                    name = "OpenAI (GPT)",
+                    hint = "platform.openai.com → API keys",
+                    key = s.openaiKey,
+                    onKey = { v -> vm.update { it.copy(openaiKey = v) } },
+                    model = s.openaiModel,
+                    models = SettingsViewModel.OPENAI_MODELS,
+                    onModel = { v -> vm.update { it.copy(openaiModel = v) } },
+                    testResult = tests["openai"],
+                    onTest = { vm.testOpenAi() }
+                )
+                HorizontalDivider(color = Tokens.BorderSubtle)
+
+                ProviderCard(
+                    name = "Anthropic (Claude)",
+                    hint = "console.anthropic.com → API keys",
+                    key = s.anthropicKey,
+                    onKey = { v -> vm.update { it.copy(anthropicKey = v) } },
+                    model = s.anthropicModel,
+                    models = SettingsViewModel.ANTHROPIC_MODELS,
+                    onModel = { v -> vm.update { it.copy(anthropicModel = v) } },
+                    testResult = tests["anthropic"],
+                    onTest = { vm.testAnthropic() }
+                )
+                HorizontalDivider(color = Tokens.BorderSubtle)
+
+                ProviderCard(
+                    name = "Ollama (local, free)",
+                    hint = "Apne PC par Ollama chal raha ho",
+                    key = s.ollamaUrl,
+                    onKey = { v -> vm.update { it.copy(ollamaUrl = v) } },
+                    keyLabel = "Ollama URL",
+                    isSecret = false,
+                    model = s.ollamaModel,
+                    models = s.ollamaModels,
+                    onModel = { v -> vm.update { it.copy(ollamaModel = v) } },
+                    testResult = tests["ollama"],
+                    onTest = { vm.testOllama() }
+                )
+            }
+
+            // ================= ② AUTO FALLBACK CHAIN =================
+            SectionCard(
+                step = "②",
+                title = "Auto Fallback Chain",
+                subtitle = "Ek model fail ho to app khud agla model try karega. Keys ke hisaab se chain auto ban jati hai."
+            ) {
+                val chain = s.fallbackChain.ifEmpty { s.autoChain }
+                if (chain.isEmpty()) {
+                    Text(
+                        "Abhi chain khali hai — ① me key daalte hi auto ban jayegi.",
+                        color = Tokens.TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    chain.forEachIndexed { i, entry ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${i + 1}.",
+                                color = Tokens.AccentPrimary,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text(
+                                entry,
+                                color = Tokens.TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = AppFonts.Mono),
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { vm.moveChain(i, up = true) }, enabled = i > 0) {
+                                Icon(Icons.Filled.KeyboardArrowUp, "Up", tint = Tokens.TextSecondary)
+                            }
+                            IconButton(
+                                onClick = { vm.moveChain(i, up = false) },
+                                enabled = i < chain.size - 1
+                            ) {
+                                Icon(Icons.Filled.KeyboardArrowDown, "Down", tint = Tokens.TextSecondary)
+                            }
+                        }
+                    }
+                    Text(
+                        "↑↓ se order badal sakte hain. Pehle wala model sabse pehle call hota hai.",
+                        color = Tokens.TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            // ================= ③ EXCHANGES =================
+            SectionCard(
+                step = "③",
+                title = "Exchange API Keys (Live trading)",
+                subtitle = "Optional — sirf tab chahiye jab app se trade execute karwana ho."
+            ) {
                 SecretField("Bitget API Key", s.bitgetKey) { v -> vm.update { it.copy(bitgetKey = v) } }
                 SecretField("Bitget Secret", s.bitgetSecret) { v -> vm.update { it.copy(bitgetSecret = v) } }
                 SecretField("Bitget Passphrase", s.bitgetPassphrase) { v -> vm.update { it.copy(bitgetPassphrase = v) } }
-                TestRow("bitget", "Test Connection", tests["bitget"]) { vm.testBitget() }
+                TestRow("bitget", tests["bitget"]) { vm.testBitget() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
                 SecretField("Binance API Key", s.binanceKey) { v -> vm.update { it.copy(binanceKey = v) } }
                 SecretField("Binance Secret", s.binanceSecret) { v -> vm.update { it.copy(binanceSecret = v) } }
-                TestRow("binance", "Test Connection", tests["binance"]) { vm.testBinance() }
+                TestRow("binance", tests["binance"]) { vm.testBinance() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
                 SecretField("Bybit API Key", s.bybitKey) { v -> vm.update { it.copy(bybitKey = v) } }
                 SecretField("Bybit Secret", s.bybitSecret) { v -> vm.update { it.copy(bybitSecret = v) } }
-                TestRow("bybit", "Test Connection", tests["bybit"]) { vm.testBybit() }
+                TestRow("bybit", tests["bybit"]) { vm.testBybit() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
                 PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
                 SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
-                PlainField("MT5 Server (e.g. ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
-                TestRow("mt5", "Test Connection", tests["mt5"]) { vm.testMt5() }
+                PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
+                TestRow("mt5", tests["mt5"]) { vm.testMt5() }
             }
 
-            // ================= SECTION 2: AI KEYS =================
-            Section("AI Model API Keys") {
-                SecretField("Google Gemini API Key (PRIMARY)", s.geminiKey) { v ->
-                    vm.update { it.copy(geminiKey = v) }
-                }
-                DropdownField("Gemini Model", s.geminiModel, s.geminiModels) { v ->
-                    vm.update { it.copy(geminiModel = v) }
-                }
-                TestRow("gemini", "Test API Key", tests["gemini"]) { vm.testGemini() }
-                HorizontalDivider(color = Tokens.BorderSubtle)
-
-                SecretField("OpenAI API Key", s.openaiKey) { v -> vm.update { it.copy(openaiKey = v) } }
-                DropdownField("OpenAI Model", s.openaiModel, SettingsViewModel.OPENAI_MODELS) { v ->
-                    vm.update { it.copy(openaiModel = v) }
-                }
-                TestRow("openai", "Test API Key", tests["openai"]) { vm.testOpenAi() }
-                HorizontalDivider(color = Tokens.BorderSubtle)
-
-                SecretField("Anthropic API Key", s.anthropicKey) { v -> vm.update { it.copy(anthropicKey = v) } }
-                DropdownField("Claude Model", s.anthropicModel, SettingsViewModel.ANTHROPIC_MODELS) { v ->
-                    vm.update { it.copy(anthropicModel = v) }
-                }
-                TestRow("anthropic", "Test API Key", tests["anthropic"]) { vm.testAnthropic() }
-                HorizontalDivider(color = Tokens.BorderSubtle)
-
-                PlainField("Ollama Endpoint URL", s.ollamaUrl) { v -> vm.update { it.copy(ollamaUrl = v) } }
-                DropdownField("Ollama Model", s.ollamaModel, s.ollamaModels) { v ->
-                    vm.update { it.copy(ollamaModel = v) }
-                }
-                TestRow("ollama", "Test Connection", tests["ollama"]) { vm.testOllama() }
-            }
-
-            // ================= SECTION 3: FALLBACK CHAIN =================
-            Section("AI Fallback Chain (↑↓ se reorder)") {
-                s.fallbackChain.forEachIndexed { i, entry ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "${i + 1}.",
-                            color = Tokens.TextSecondary,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text(
-                            entry,
-                            color = if (i == 0) Tokens.AccentPrimary else Tokens.TextPrimary,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = AppFonts.Mono),
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { vm.moveChain(i, up = true) }, enabled = i > 0) {
-                            Icon(Icons.Filled.KeyboardArrowUp, "Up", tint = Tokens.TextSecondary)
-                        }
-                        IconButton(onClick = { vm.moveChain(i, up = false) }, enabled = i < s.fallbackChain.size - 1) {
-                            Icon(Icons.Filled.KeyboardArrowDown, "Down", tint = Tokens.TextSecondary)
-                        }
-                    }
-                }
-                Text(
-                    "Pinned model Chat top-bar me dikhta hai. Chain me pehle wala model Tier-1 (Gemini) hai.",
-                    color = Tokens.TextSecondary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            // ================= SECTION 4: BACKEND =================
-            Section("Backend Connection") {
-                PlainField("Backend REST URL (e.g. http://192.168.1.100:8000)", s.backendUrl) { v ->
+            // ================= ④ BACKEND =================
+            SectionCard(
+                step = "④",
+                title = "Backend (optional)",
+                subtitle = "Apna TradingAgentArmy backend server ho to URL daalein — chat pehle wahan jayega."
+            ) {
+                PlainField("REST URL (jaise http://192.168.1.100:8000)", s.backendUrl) { v ->
                     vm.update { it.copy(backendUrl = v) }
                 }
-                PlainField("WebSocket URL (e.g. ws://192.168.1.100:8000/ws)", s.wsUrl) { v ->
+                PlainField("WebSocket URL (jaise ws://192.168.1.100:8000/ws)", s.wsUrl) { v ->
                     vm.update { it.copy(wsUrl = v) }
                 }
                 SecretField("Auth Bearer Token", s.bearerToken) { v -> vm.update { it.copy(bearerToken = v) } }
-                TestRow("backend", "Test Connection", tests["backend"]) { vm.testBackend() }
+                TestRow("backend", tests["backend"]) { vm.testBackend() }
             }
 
-            // ================= SECTION 5: PREFERENCES =================
-            Section("App Preferences") {
-                SwitchRow("AMOLED Black theme", s.amoled) { v -> vm.update { it.copy(amoled = v) } }
+            // ================= ⑤ LOOKS + NOTIFICATIONS =================
+            SectionCard(
+                step = "⑤",
+                title = "App Color + Notifications",
+                subtitle = "App ka theme chunein — White (default), Dark ya AMOLED Black."
+            ) {
+                Text("Theme", color = Tokens.TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemeChip("⚪ White", s.themeMode == "light") { vm.update { it.copy(themeMode = "light") } }
+                    ThemeChip("🌙 Dark", s.themeMode == "dark") { vm.update { it.copy(themeMode = "dark") } }
+                    ThemeChip("⚫ AMOLED", s.themeMode == "amoled") { vm.update { it.copy(themeMode = "amoled") } }
+                }
+                HorizontalDivider(color = Tokens.BorderSubtle)
+
                 SwitchRow("Trade executed alerts", s.notifyTrades) { v -> vm.update { it.copy(notifyTrades = v) } }
                 SwitchRow("Bot crash alerts", s.notifyCrash) { v -> vm.update { it.copy(notifyCrash = v) } }
                 SwitchRow("Daily P&L summary", s.notifyDaily) { v -> vm.update { it.copy(notifyDaily = v) } }
@@ -214,7 +302,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Dashboard refresh: ", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("Chart/price refresh: ", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
                     listOf(5, 10, 30, 60).forEach { sec ->
                         TextButton(onClick = { vm.update { it.copy(refreshInterval = sec) } }) {
                             Text(
@@ -234,7 +322,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Version ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                        "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Firebase: sqlrrr",
                         color = Tokens.TextSecondary,
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = AppFonts.Mono)
                     )
@@ -244,21 +332,18 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
 
             // ================= DANGER ZONE =================
             Surface(
-                color = Tokens.AccentDanger.copy(alpha = 0.08f),
+                color = Tokens.AccentDanger.copy(alpha = 0.07f),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("⚠️ Danger Zone", color = Tokens.AccentDanger, style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Sabhi saved API keys device se delete ho jayengi (EncryptedSharedPreferences clear).",
+                        "Sabhi saved keys device se delete ho jayengi.",
                         color = Tokens.TextSecondary,
                         style = MaterialTheme.typography.bodySmall
                     )
-                    OutlinedButton(
-                        onClick = { vm.clearAllKeys() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    OutlinedButton(onClick = { vm.clearAllKeys() }, modifier = Modifier.fillMaxWidth()) {
                         Text("Clear All Keys", color = Tokens.AccentDanger)
                     }
                 }
@@ -280,8 +365,8 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     )
                     Text("Build date: ${BuildConfig.BUILD_DATE}", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
                     Text("Package: ${BuildConfig.APPLICATION_ID}", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
-                    Text("Model layer: Gemini → OpenAI → Claude → Ollama", color = Tokens.AccentPrimary, style = MaterialTheme.typography.bodySmall)
-                    Text("Firebase project: sqlrrr · Firestore synced", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("AI chain: Gemini → DeepSeek → OpenAI → Claude → Ollama → offline", color = Tokens.AccentPrimary, style = MaterialTheme.typography.bodySmall)
+                    Text("Firebase: sqlrrr · Firestore synced", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = {
@@ -291,13 +376,70 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
     }
 }
 
+// ---------------------------------------------------------------- helpers
+
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    Surface(color = Tokens.Surface, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+private fun SectionCard(
+    step: String,
+    title: String,
+    subtitle: String,
+    content: @Composable () -> Unit
+) {
+    Surface(color = Tokens.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, color = Tokens.AccentPrimary, style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    step,
+                    color = Tokens.AccentPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                Column {
+                    Text(title, color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                    Text(subtitle, color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            HorizontalDivider(color = Tokens.BorderSubtle)
             content()
         }
+    }
+}
+
+@Composable
+private fun ProviderCard(
+    name: String,
+    hint: String,
+    key: String,
+    onKey: (String) -> Unit,
+    model: String,
+    models: List<String>,
+    onModel: (String) -> Unit,
+    testResult: String?,
+    onTest: () -> Unit,
+    keyLabel: String = "API Key",
+    isSecret: Boolean = true
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(name, color = Tokens.TextPrimary, style = MaterialTheme.typography.labelLarge)
+                Text(hint, color = Tokens.TextSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            if (key.isNotBlank()) {
+                Text("● saved", color = Tokens.AccentPrimary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        if (isSecret) {
+            SecretField(keyLabel, key, onKey)
+        } else {
+            PlainField(keyLabel, key, onKey)
+        }
+        DropdownField("Model", model, models, onModel)
+        TestRow(name.substringBefore(" ").substringBefore("("), testResult, onTest)
     }
 }
 
@@ -383,7 +525,7 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-private fun TestRow(key: String, label: String, result: String?, onTest: () -> Unit) {
+private fun TestRow(label: String, result: String?, onTest: () -> Unit) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -400,8 +542,21 @@ private fun TestRow(key: String, label: String, result: String?, onTest: () -> U
             modifier = Modifier.weight(1f)
         )
         OutlinedButton(onClick = onTest) {
-            Text("🔌 $label", color = Tokens.AccentPrimary, style = MaterialTheme.typography.labelMedium)
+            Text("🔌 Test", color = Tokens.AccentPrimary, style = MaterialTheme.typography.labelMedium)
         }
+    }
+}
+
+@Composable
+private fun ThemeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) Tokens.AccentPrimary.copy(alpha = 0.12f) else Color.Transparent,
+            contentColor = if (selected) Tokens.AccentPrimary else Tokens.TextSecondary
+        )
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -418,7 +573,7 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = Tokens.AccentPrimary,
-                checkedThumbColor = Tokens.BackgroundBase
+                checkedThumbColor = Tokens.Surface
             )
         )
     }

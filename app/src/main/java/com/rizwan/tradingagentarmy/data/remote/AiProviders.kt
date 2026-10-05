@@ -43,8 +43,16 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
             .build()
     }
 
+    private val ollamaHttp: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build()
+    }
+
     sealed class Target(val model: String, val tier: Int) {
         class Gemini(model: String) : Target(model, 1)
+        class DeepSeek(model: String) : Target(model, 1)
         class OpenAi(model: String) : Target(model, 2)
         class Anthropic(model: String) : Target(model, 2)
         class Ollama(model: String) : Target(model, 3)
@@ -55,9 +63,12 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         val e = entry.trim()
         if (e.isEmpty()) return null
         if (e.startsWith("ollama:")) return Target.Ollama(e.removePrefix("ollama:"))
+        if (":" in e) return Target.Ollama(e)
         return when {
-            e.startsWith("gemini") -> Target.Gemini(e)
-            e.startsWith("gpt") || e.startsWith("o1") -> Target.OpenAi(e)
+            e.startsWith("gemini") || e.startsWith("gemma") || e.startsWith("imagen-") ||
+                e.startsWith("text-embedding") || e.startsWith("audio-embedding") -> Target.Gemini(e)
+            e.startsWith("deepseek") -> Target.DeepSeek(e)
+            e.startsWith("gpt") || e.startsWith("o1") || e.startsWith("o3") || e.startsWith("chatgpt") -> Target.OpenAi(e)
             e.startsWith("claude") -> Target.Anthropic(e)
             e.startsWith("llama") || e.startsWith("mistral") || e.startsWith("gemma") ||
                 e.startsWith("phi") -> Target.Ollama(e)
@@ -65,18 +76,52 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         }
     }
 
+    /**
+     * Auto fallback chain:
+     *  1. pinned model (if set)
+     *  2. user's manual chain (only providers that actually have credentials)
+     *  3. every other configured provider auto-appended (auto-fill)
+     * Result: ek provider fail ho to agla turant try hota hai.
+     */
     fun chain(): List<Target> {
         if (prefs.pinnedModel.isNotBlank()) {
-            resolve(prefs.pinnedModel)?.let { return listOf(it) }
+            resolve(prefs.pinnedModel)?.filterConfigured()?.let { return listOf(it) }
         }
-        return prefs.fallbackChain.split(",").mapNotNull { resolve(it) }
+        val ordered = LinkedHashMap<String, Target>()
+        prefs.fallbackChain.split(",").forEach { entry ->
+            resolve(entry)?.filterConfigured()?.let { ordered[it.model] = it }
+        }
+        autoTargets().forEach { t -> if (!ordered.containsKey(t.model)) ordered[t.model] = t }
+        return ordered.values.toList()
+    }
+
+    /** Providers the user has keys/endpoint for — in preferred priority order. */
+    private fun autoTargets(): List<Target> {
+        val list = mutableListOf<Target>()
+        if (prefs.geminiKey.isNotBlank() && prefs.geminiModel.isNotBlank())
+            list += Target.Gemini(prefs.geminiModel)
+        if (prefs.deepseekKey.isNotBlank()) list += Target.DeepSeek(prefs.deepseekModel.ifBlank { "deepseek-chat" })
+        if (prefs.openaiKey.isNotBlank() && prefs.openaiModel.isNotBlank()) list += Target.OpenAi(prefs.openaiModel)
+        if (prefs.anthropicKey.isNotBlank() && prefs.anthropicModel.isNotBlank()) list += Target.Anthropic(prefs.anthropicModel)
+        if (prefs.ollamaUrl != "http://10.0.2.2:11434" && prefs.ollamaModel.isNotBlank())
+            list += Target.Ollama(prefs.ollamaModel)
+        return list
+    }
+
+    private fun Target.filterConfigured(): Target? = when (this) {
+        is Target.Gemini -> if (prefs.geminiKey.isNotBlank()) this else null
+        is Target.DeepSeek -> if (prefs.deepseekKey.isNotBlank()) this else null
+        is Target.OpenAi -> if (prefs.openaiKey.isNotBlank()) this else null
+        is Target.Anthropic -> if (prefs.anthropicKey.isNotBlank()) this else null
+        is Target.Ollama -> if (prefs.ollamaModel.isNotBlank()) this else null
     }
 
     fun labelOf(target: Target): String = when (target) {
-        is Target.Gemini -> "Gemini ${target.model}"
-        is Target.OpenAi -> "OpenAI ${target.model}"
-        is Target.Anthropic -> "Claude ${target.model}"
-        is Target.Ollama -> "Ollama ${target.model}"
+        is Target.Gemini -> "Gemini"
+        is Target.DeepSeek -> "DeepSeek"
+        is Target.OpenAi -> "OpenAI"
+        is Target.Anthropic -> "Claude"
+        is Target.Ollama -> "Ollama"
     }
 
     /**
@@ -92,6 +137,7 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
     ): String = withContext(Dispatchers.IO) {
         when (target) {
             is Target.Gemini -> streamGemini(target.model, system, history, userText, onDelta)
+            is Target.DeepSeek -> streamDeepSeek(target.model, system, history, userText, onDelta)
             is Target.OpenAi -> streamOpenAi(target.model, system, history, userText, onDelta)
             is Target.Anthropic -> streamAnthropic(target.model, system, history, userText, onDelta)
             is Target.Ollama -> streamOllama(target.model, system, history, userText, onDelta)
@@ -133,6 +179,39 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
                 ?.get("parts")?.jsonArray ?: return@executeSse null
             parts.joinToString("") { it.jsonObject["text"]?.jsonPrimitive?.content ?: "" }
                 .ifEmpty { null }
+        }
+    }
+
+    // ---------------- DeepSeek (OpenAI-compatible) ----------------
+    private fun streamDeepSeek(
+        model: String, system: String, history: List<ChatTurn>, userText: String,
+        onDelta: suspend (String) -> Unit
+    ): String {
+        val key = prefs.deepseekKey
+        if (key.isBlank()) throw ProviderException(401, "DeepSeek key missing")
+        val body = buildJsonObject {
+            put("model", model)
+            put("stream", true)
+            putJsonArray("messages") {
+                add(buildJsonObject { put("role", "system"); put("content", system) })
+                history.forEach { t ->
+                    add(buildJsonObject { put("role", t.role); put("content", t.content) })
+                }
+                add(buildJsonObject { put("role", "user"); put("content", userText) })
+            }
+        }
+        val req = Request.Builder()
+            .url("https://api.deepseek.com/chat/completions")
+            .header("Authorization", "Bearer $key")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return executeSse(req, onDelta) { payload ->
+            if (payload.contains("[DONE]")) return@executeSse null
+            runCatching {
+                val delta = Json.parseToJsonElement(payload).jsonObject["choices"]?.jsonArray?.firstOrNull()
+                    ?.jsonObject?.get("delta")?.jsonObject
+                delta?.get("content")?.jsonPrimitive?.content
+            }.getOrNull()?.ifEmpty { null }
         }
     }
 
@@ -226,7 +305,7 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
             .url("$base/api/chat")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        return executeNdjson(req, onDelta) { line ->
+        return executeNdjson(req, onDelta, ollamaHttp) { line ->
             runCatching {
                 val obj = Json.parseToJsonElement(line).jsonObject
                 if (obj["error"] != null) throw ProviderException(500, obj["error"]!!.jsonPrimitive.content)
@@ -240,8 +319,8 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         val resp = http.newCall(req).execute()
         resp.use {
             if (!it.isSuccessful) {
-                val err = it.body?.string()?.take(300) ?: ""
-                throw ProviderException(it.code, "HTTP ${it.code}: $err")
+                val err = it.body?.string() ?: ""
+                throw ProviderException(it.code, cleanHttpError(it.code, err))
             }
             val body = it.body ?: throw ProviderException(500, "empty body")
             val source = body.source()
@@ -272,12 +351,17 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         }
     }
 
-    private fun executeNdjson(req: Request, onDelta: suspend (String) -> Unit, parse: (String) -> String?): String {
-        val resp = http.newCall(req).execute()
+    private fun executeNdjson(
+        req: Request,
+        onDelta: suspend (String) -> Unit,
+        client: OkHttpClient = http,
+        parse: (String) -> String?
+    ): String {
+        val resp = client.newCall(req).execute()
         resp.use {
             if (!it.isSuccessful) {
-                val err = it.body?.string()?.take(300) ?: ""
-                throw ProviderException(it.code, "HTTP ${it.code}: $err")
+                val err = it.body?.string() ?: ""
+                throw ProviderException(it.code, cleanHttpError(it.code, err))
             }
             val body = it.body ?: throw ProviderException(500, "empty body")
             val source = body.source()
@@ -300,6 +384,20 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
         }
     }
 
+    /** Short human error: extracts the useful part from provider JSON errors. */
+    private fun cleanHttpError(code: Int, body: String): String {
+        val msg = Regex(""""message"\s*:\s*"([^"]{1,160})"""").find(body)?.groupValues?.get(1)
+            ?: Regex(""""error"\s*:\s*"([^"]{1,160})"""").find(body)?.groupValues?.get(1)
+            ?: body.replace("\\s+".toRegex(), " ").take(140)
+        val hint = when {
+            "model" in body.lowercase() && (code == 404 || code == 400) -> " (model not found / retired)"
+            "API key not valid" in body || "API_KEY_INVALID" in body -> " (key invalid)"
+            code == 429 -> " (rate limit / quota)"
+            else -> ""
+        }
+        return "HTTP $code: $msg$hint"
+    }
+
     // ---------------- plain (non-stream) calls ----------------
     fun testGemini(): String {
         val key = prefs.geminiKey
@@ -308,9 +406,20 @@ class AiProviders @Inject constructor(private val prefs: SecurePreferences) {
             .url("https://generativelanguage.googleapis.com/v1beta/models?key=$key")
             .get().build()
         http.newCall(req).execute().use {
-            if (!it.isSuccessful) throw ProviderException(it.code, "HTTP ${it.code}")
+            if (!it.isSuccessful) throw ProviderException(it.code, cleanHttpError(it.code, it.body?.string() ?: ""))
             val models = json.parseToJsonElement(it.body!!.string()).jsonObject["models"]?.jsonArray?.size ?: 0
             return "$models models available"
+        }
+    }
+
+    fun testDeepseek(): String {
+        val key = prefs.deepseekKey
+        if (key.isBlank()) throw ProviderException(401, "Key not set")
+        val req = Request.Builder().url("https://api.deepseek.com/models")
+            .header("Authorization", "Bearer $key").get().build()
+        http.newCall(req).execute().use {
+            if (!it.isSuccessful) throw ProviderException(it.code, cleanHttpError(it.code, it.body?.string() ?: ""))
+            return "Key valid"
         }
     }
 

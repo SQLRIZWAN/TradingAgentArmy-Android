@@ -61,26 +61,31 @@ class GetAiResponseUseCase @Inject constructor(
         history: List<ChatTurn>,
         onDelta: suspend (String) -> Unit
     ): AiResult = withContext(Dispatchers.IO) {
-        // 1 - backend first
+        val attempts = mutableListOf<String>()
+        // 1 - backend first (only when configured)
         if (prefs.backendUrl.isNotBlank()) {
-            runCatching { backendChat(userText, history) }.getOrNull()?.let { reply ->
+            val backendResult = runCatching { backendChat(userText, history) }
+            backendResult.onSuccess { reply ->
                 reply.chunked(4).forEach { piece -> onDelta(piece) }
                 return@withContext AiResult(reply, "backend", 0, backendUsed = true)
             }
-        }
-        // 2 - direct model chain
-        val attempts = mutableListOf<String>()
-        for (target in providers.chain()) {
-            try {
-                val label = providers.labelOf(target)
-                val full = providers.stream(target, systemPrompt, history, userText, onDelta)
-                return@withContext AiResult(full, label, target.tier, backendUsed = false)
-            } catch (e: ProviderException) {
-                attempts += "${e.message?.take(40)}"
-            } catch (e: Exception) {
-                attempts += (e.javaClass.simpleName)
+            backendResult.onFailure { e ->
+                attempts += "Backend: ${e.message?.take(60) ?: "offline"}"
             }
         }
+        // 2 - direct model chain (auto fallback: ek fail -> agla)
+        for (target in providers.chain()) {
+            val label = providers.labelOf(target)
+            try {
+                val full = providers.stream(target, systemPrompt, history, userText, onDelta)
+                return@withContext AiResult(full, "$label ${target.model}", target.tier, backendUsed = false)
+            } catch (e: ProviderException) {
+                attempts += "$label: ${e.message?.take(90)?.replace('\n', ' ') ?: "failed"}"
+            } catch (e: Exception) {
+                attempts += "$label: ${e.javaClass.simpleName}"
+            }
+        }
+        if (attempts.isEmpty()) attempts += "koi AI key save nahi hai (Settings -> AI Model Keys)"
         // 3 - offline rule-based fallback
         val fallback = offlineReply(userText, attempts)
         onDelta(fallback)
@@ -121,7 +126,11 @@ class GetAiResponseUseCase @Inject constructor(
             listOf("buy", "sell", "signal", "entry").any { it in q } ->
                 "⚠️ Live signal ke liye AI model key chahiye (Settings → AI Model Keys) ya backend connect karna hoga. Bina live data ke main signal nahi de sakta — zero hallucination rule."
             else ->
-                "⚠️ Direct Mode — koi AI model available nahi hai.\n\nCheck karein:\n• Settings → AI Model Keys (Gemini key daalein — Tier 1)\n• Ya Backend URL set karein\n\nAttempts: ${attempts.joinToString(", ").ifEmpty { "none" }}"
+                "⚠️ Direct Mode — koi AI model available nahi hai.\n\n" +
+                    "Check karein:\n• Settings → ① AI Model Keys (kam se kam ek key — Gemini best hai)\n" +
+                    "• Key daalne ke baad ⌁ auto-save hoti hai, phir dobara bhejein\n" +
+                    "• Ya Backend URL set karein\n\n" +
+                    "Attempts:\n" + attempts.joinToString("\n") { "• $it" }
         }
     }
 }

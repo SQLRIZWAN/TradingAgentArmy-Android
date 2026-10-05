@@ -87,7 +87,7 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         get() = getString(K_GEMINI_KEY)
         set(v) = putString(K_GEMINI_KEY, v)
     var geminiModel: String
-        get() = getString(K_GEMINI_MODEL, "gemini-2.0-flash-exp")
+        get() = getString(K_GEMINI_MODEL, "gemini-2.5-flash")
         set(v) = putString(K_GEMINI_MODEL, v)
     var openaiKey: String
         get() = getString(K_OPENAI_KEY)
@@ -108,9 +108,25 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         get() = getString(K_OLLAMA_MODEL, "llama3:8b")
         set(v) = putString(K_OLLAMA_MODEL, v)
 
+    var deepseekKey: String
+        get() = getString(K_DEEPSEEK_KEY)
+        set(v) = putString(K_DEEPSEEK_KEY, v)
+    var deepseekModel: String
+        get() = getString(K_DEEPSEEK_MODEL, "deepseek-chat")
+        set(v) = putString(K_DEEPSEEK_MODEL, v)
+
     var fallbackChain: String
-        get() = getString(K_FALLBACK_CHAIN, DEFAULT_CHAIN)
+        get() = migrateChain(getString(K_FALLBACK_CHAIN, DEFAULT_CHAIN))
         set(v) = putString(K_FALLBACK_CHAIN, v)
+
+    // retired Gemini model ids -> current ones (silent upgrade for old installs)
+    private fun migrateChain(raw: String): String {
+        var c = raw
+        retiredModels.forEach { (old, new) ->
+            c = c.split(old).joinToString(new)
+        }
+        return c
+    }
 
     var pinnedModel: String
         get() = getString(K_PINNED_MODEL)
@@ -131,6 +147,9 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
     var amoled: Boolean
         get() = getBool(K_AMOLED, false)
         set(v) = putBool(K_AMOLED, v)
+    var themeMode: String
+        get() = getString(K_THEME_MODE, "light")
+        set(v) = putString(K_THEME_MODE, v)
     var notifyTrades: Boolean
         get() = getBool(K_NOTIFY_TRADES, true)
         set(v) = putBool(K_NOTIFY_TRADES, v)
@@ -163,6 +182,9 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         const val K_MT5_SERVER = "mt5_server"
         const val K_GEMINI_KEY = "gemini_key"
         const val K_GEMINI_MODEL = "gemini_model"
+        const val K_DEEPSEEK_KEY = "deepseek_key"
+        const val K_DEEPSEEK_MODEL = "deepseek_model"
+        const val K_THEME_MODE = "theme_mode"
         const val K_OPENAI_KEY = "openai_key"
         const val K_OPENAI_MODEL = "openai_model"
         const val K_ANTHROPIC_KEY = "anthropic_key"
@@ -183,6 +205,16 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         const val K_REFRESH = "refresh_interval"
 
         const val DEFAULT_CHAIN =
-            "gemini-2.0-flash-exp,gemini-1.5-pro,gpt-4o,gpt-4o-mini,claude-sonnet-4-5,ollama:llama3:8b"
+            "gemini-2.5-flash,gemini-2.5-pro,deepseek-chat,gpt-4o,gpt-4o-mini,claude-sonnet-4-5"
+
+        private val retiredModels = mapOf(
+            "gemini-2.0-flash-exp" to "gemini-2.5-flash",
+            "gemini-exp-1206" to "gemini-2.5-flash",
+            "gemini-1.5-pro" to "gemini-2.5-pro",
+            "gemini-1.5-flash-8b" to "gemini-2.5-flash",
+            "gemini-1.5-flash" to "gemini-2.5-flash",
+            "gemini-2.0-pro-exp" to "gemini-2.5-pro",
+            "gemini-1.0-pro" to "gemini-2.5-pro"
+        )
     }
 }

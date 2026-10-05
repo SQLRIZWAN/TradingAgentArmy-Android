@@ -1,8 +1,6 @@
 package com.rizwan.tradingagentarmy.ui.dashboard
 
 import android.annotation.SuppressLint
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -39,12 +37,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
 import com.rizwan.tradingagentarmy.ui.theme.AppFonts
@@ -64,6 +65,8 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
     val lastSync by viewModel.lastSync.collectAsState()
     val selected by viewModel.selected.collectAsState()
     val chartError by viewModel.chartError.collectAsState()
+    val candles by viewModel.candles.collectAsState()
+    val chartLoading by viewModel.chartLoading.collectAsState()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -216,19 +219,35 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                                 })
                             }
                         }
-                        Text("TradingView", style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
+                        Text("15m · Live", style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
                     }
                     Box(Modifier.height(240.dp)) {
-                        if (chartError) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    "Chart offline — network check karein",
-                                    color = Tokens.TextSecondary,
-                                    style = MaterialTheme.typography.bodySmall
+                        when {
+                            chartLoading && candles.isEmpty() -> Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Tokens.AccentPrimary,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
-                        } else {
-                            MiniChart(url = viewModel.chartUrl(), onError = viewModel::onChartError)
+                            chartError && candles.isEmpty() -> Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "Chart load nahi hua — network check karein",
+                                        color = Tokens.TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    TextButton(onClick = { viewModel.loadCandles() }) {
+                                        Text("⟳ Retry", color = Tokens.AccentPrimary)
+                                    }
+                                }
+                            }
+                            else -> CandleChart(candles, Modifier.fillMaxSize())
                         }
                     }
                 }
@@ -339,38 +358,95 @@ private fun TickerCard(t: MarketTicker, onClick: () -> Unit) {
 
 private fun formatPrice(p: Double, decimals: Int) = "%,.${decimals}f".format(p)
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MiniChart(url: String, onError: () -> Unit) {
-    var loading by remember { mutableStateOf(true) }
-    Box(Modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    webViewClient = object : WebViewClient() {
-                        override fun onReceivedError(
-                            view: WebView?, request: android.webkit.WebResourceRequest?,
-                            error: android.webkit.WebResourceError?
-                        ) {
-                            onError()
-                        }
+private fun CandleChart(candles: List<Candle>, modifier: Modifier = Modifier) {
+    if (candles.isEmpty()) return
+    val gridColor = Tokens.BorderSubtle
+    val upColor = Tokens.AccentPrimary
+    val downColor = Tokens.AccentDanger
+    val labelColor = Tokens.TextSecondary
+    val lastColor = Tokens.TextPrimary
+    Canvas(modifier) {
+        val chartW = size.width - 56.dp.toPx()
+        val chartH = size.height
+        var lo = candles.minOf { it.l }
+        var hi = candles.maxOf { it.h }
+        if (hi - lo < 0.0001f) { hi += 1f; lo -= 1f }
+        val pad = (hi - lo) * 0.06f
+        lo -= pad; hi += pad
+        fun y(p: Float) = chartH - ((p - lo) / (hi - lo)) * chartH
 
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            loading = false
-                        }
-                    }
-                    loadUrl(url)
-                }
-            },
-            update = { wv -> if (wv.url != url) wv.loadUrl(url) },
-            modifier = Modifier.fillMaxSize()
-        )
-        if (loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Tokens.AccentPrimary, modifier = Modifier.size(28.dp))
-            }
+        val textPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(
+                (labelColor.alpha * 255).toInt(),
+                (labelColor.red * 255).toInt(),
+                (labelColor.green * 255).toInt(),
+                (labelColor.blue * 255).toInt()
+            )
+            textSize = 10.dp.toPx()
+            isAntiAlias = true
         }
+        val lastPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(
+                (lastColor.alpha * 255).toInt(),
+                (lastColor.red * 255).toInt(),
+                (lastColor.green * 255).toInt(),
+                (lastColor.blue * 255).toInt()
+            )
+            textSize = 10.dp.toPx()
+            isAntiAlias = true
+            isFakeBoldText = true
+        }
+
+        // horizontal grid + right-side price labels
+        for (i in 0..4) {
+            val price = lo + (hi - lo) * i / 4f
+            val yy = y(price)
+            drawLine(gridColor, Offset(0f, yy), Offset(chartW, yy), strokeWidth = 1f)
+            drawContext.canvas.nativeCanvas.drawText(
+                fmtPrice(price), chartW + 6.dp.toPx(), yy + 3.dp.toPx(), textPaint
+            )
+        }
+
+        val slot = chartW / candles.size
+        val bodyW = (slot * 0.62f).coerceAtLeast(1.5f)
+        candles.forEachIndexed { i, c ->
+            val x = i * slot + slot / 2
+            val color = if (c.c >= c.o) upColor else downColor
+            drawLine(
+                color = color,
+                start = Offset(x, y(c.h)),
+                end = Offset(x, y(c.l)),
+                strokeWidth = 1.2f
+            )
+            val top = y(maxOf(c.o, c.c))
+            val bot = y(minOf(c.o, c.c))
+            drawRect(
+                color = color,
+                topLeft = Offset(x - bodyW / 2, top),
+                size = Size(bodyW, maxOf(bot - top, 1.5f))
+            )
+        }
+
+        // last price marker
+        val lastY = y(candles.last().c)
+        drawLine(
+            color = upColor.copy(alpha = 0.7f),
+            start = Offset(0f, lastY),
+            end = Offset(chartW, lastY),
+            strokeWidth = 1f
+        )
+        drawContext.canvas.nativeCanvas.drawText(
+            fmtPrice(candles.last().c),
+            chartW + 6.dp.toPx(),
+            lastY - 4.dp.toPx(),
+            lastPaint
+        )
     }
+}
+
+private fun fmtPrice(p: Float): String = when {
+    p >= 1000f -> "%,.0f".format(p)
+    p >= 10f -> "%.2f".format(p)
+    else -> "%.4f".format(p)
 }

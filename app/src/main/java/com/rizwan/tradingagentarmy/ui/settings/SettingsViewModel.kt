@@ -33,20 +33,24 @@ data class SettingsUi(
     val mt5Password: String = "",
     val mt5Server: String = "",
     val geminiKey: String = "",
-    val geminiModel: String = "gemini-2.0-flash-exp",
+    val geminiModel: String = "gemini-2.5-flash",
     val openaiKey: String = "",
     val openaiModel: String = "gpt-4o",
     val anthropicKey: String = "",
     val anthropicModel: String = "claude-sonnet-4-5",
+    val deepseekKey: String = "",
+    val deepseekModel: String = "deepseek-chat",
     val ollamaUrl: String = "http://10.0.2.2:11434",
     val ollamaModel: String = "llama3:8b",
     val fallbackChain: List<String> = listOf(),
+    val autoChain: List<String> = listOf(),
     val geminiModels: List<String> = SettingsViewModel.GEMINI_MODELS,
+    val deepseekModels: List<String> = SettingsViewModel.DEEPSEEK_MODELS,
     val ollamaModels: List<String> = SettingsViewModel.OLLAMA_MODELS,
     val backendUrl: String = "",
     val wsUrl: String = "",
     val bearerToken: String = "",
-    val amoled: Boolean = false,
+    val themeMode: String = "light",
     val notifyTrades: Boolean = true,
     val notifyCrash: Boolean = true,
     val notifyDaily: Boolean = true,
@@ -94,13 +98,15 @@ class SettingsViewModel @Inject constructor(
             openaiModel = prefs.openaiModel,
             anthropicKey = prefs.anthropicKey,
             anthropicModel = prefs.anthropicModel,
+            deepseekKey = prefs.deepseekKey,
+            deepseekModel = prefs.deepseekModel,
             ollamaUrl = prefs.ollamaUrl,
             ollamaModel = prefs.ollamaModel,
             fallbackChain = prefs.fallbackChain.split(",").filter { it.isNotBlank() },
             backendUrl = prefs.backendUrl,
             wsUrl = prefs.wsUrl,
             bearerToken = prefs.bearerToken,
-            amoled = prefs.amoled,
+            themeMode = prefs.themeMode,
             notifyTrades = prefs.notifyTrades,
             notifyCrash = prefs.notifyCrash,
             notifyDaily = prefs.notifyDaily,
@@ -108,13 +114,52 @@ class SettingsViewModel @Inject constructor(
             dailyHour = prefs.dailyHour,
             refreshInterval = prefs.refreshInterval
         )
+        _state.value = _state.value.copy(
+            autoChain = computeAutoChain(),
+            fallbackChain = _state.value.fallbackChain
+        )
         refreshGeminiModels()
         refreshOllamaModels()
     }
 
+    /** Auto chain: jo bhi keys configured hain, unka preferred order. */
+    fun computeAutoChain(): List<String> {
+        val s = _state.value
+        val list = mutableListOf<String>()
+        if (s.geminiKey.isNotBlank() && s.geminiModel.isNotBlank()) list += s.geminiModel
+        if (s.deepseekKey.isNotBlank()) list += s.deepseekModel.ifBlank { "deepseek-chat" }
+        if (s.openaiKey.isNotBlank() && s.openaiModel.isNotBlank()) list += s.openaiModel
+        if (s.anthropicKey.isNotBlank() && s.anthropicModel.isNotBlank()) list += s.anthropicModel
+        return list
+    }
+
+    private var autoSaveJob: kotlinx.coroutines.Job? = null
+
+    /** Debounced auto-save: key/type karte hi 700ms me save ho jata hai. */
+    private fun scheduleAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(700)
+            save(silent = true)
+        }
+    }
+
     fun update(transform: (SettingsUi) -> SettingsUi) {
-        _state.value = transform(_state.value)
+        val next = transform(_state.value)
+        val auto = computeAutoChainFrom(next)
+        val chain = if (next.fallbackChain.isEmpty()) auto else next.fallbackChain
+        _state.value = next.copy(autoChain = auto, fallbackChain = chain)
         _saved.value = false
+        scheduleAutoSave()
+    }
+
+    private fun computeAutoChainFrom(s: SettingsUi): List<String> {
+        val list = mutableListOf<String>()
+        if (s.geminiKey.isNotBlank() && s.geminiModel.isNotBlank()) list += s.geminiModel
+        if (s.deepseekKey.isNotBlank()) list += s.deepseekModel.ifBlank { "deepseek-chat" }
+        if (s.openaiKey.isNotBlank() && s.openaiModel.isNotBlank()) list += s.openaiModel
+        if (s.anthropicKey.isNotBlank() && s.anthropicModel.isNotBlank()) list += s.anthropicModel
+        return list
     }
 
     fun moveChain(index: Int, up: Boolean) {
@@ -169,31 +214,37 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun save() {
+    fun save(silent: Boolean = false) {
         val s = _state.value
-        prefs.bitgetKey = s.bitgetKey
-        prefs.bitgetSecret = s.bitgetSecret
-        prefs.bitgetPassphrase = s.bitgetPassphrase
-        prefs.binanceKey = s.binanceKey
-        prefs.binanceSecret = s.binanceSecret
-        prefs.bybitKey = s.bybitKey
-        prefs.bybitSecret = s.bybitSecret
-        prefs.mt5Login = s.mt5Login
-        prefs.mt5Password = s.mt5Password
-        prefs.mt5Server = s.mt5Server
-        prefs.geminiKey = s.geminiKey
-        prefs.geminiModel = s.geminiModel
-        prefs.openaiKey = s.openaiKey
-        prefs.openaiModel = s.openaiModel
-        prefs.anthropicKey = s.anthropicKey
-        prefs.anthropicModel = s.anthropicModel
+        val geminiChanged = prefs.geminiKey != s.geminiKey.trim()
+        val wsChanged = prefs.backendUrl != s.backendUrl ||
+            prefs.wsUrl != s.wsUrl ||
+            prefs.bearerToken != s.bearerToken.trim()
+        prefs.bitgetKey = s.bitgetKey.trim()
+        prefs.bitgetSecret = s.bitgetSecret.trim()
+        prefs.bitgetPassphrase = s.bitgetPassphrase.trim()
+        prefs.binanceKey = s.binanceKey.trim()
+        prefs.binanceSecret = s.binanceSecret.trim()
+        prefs.bybitKey = s.bybitKey.trim()
+        prefs.bybitSecret = s.bybitSecret.trim()
+        prefs.mt5Login = s.mt5Login.trim()
+        prefs.mt5Password = s.mt5Password.trim()
+        prefs.mt5Server = s.mt5Server.trim()
+        prefs.geminiKey = s.geminiKey.trim()
+        prefs.geminiModel = s.geminiModel.trim()
+        prefs.openaiKey = s.openaiKey.trim()
+        prefs.openaiModel = s.openaiModel.trim()
+        prefs.anthropicKey = s.anthropicKey.trim()
+        prefs.anthropicModel = s.anthropicModel.trim()
         prefs.ollamaUrl = s.ollamaUrl
-        prefs.ollamaModel = s.ollamaModel
+        prefs.ollamaModel = s.ollamaModel.trim()
+        prefs.deepseekKey = s.deepseekKey.trim()
+        prefs.deepseekModel = s.deepseekModel.trim()
         prefs.fallbackChain = s.fallbackChain.joinToString(",")
         prefs.backendUrl = s.backendUrl
         prefs.wsUrl = s.wsUrl
-        prefs.bearerToken = s.bearerToken
-        prefs.amoled = s.amoled
+        prefs.bearerToken = s.bearerToken.trim()
+        prefs.themeMode = s.themeMode
         prefs.notifyTrades = s.notifyTrades
         prefs.notifyCrash = s.notifyCrash
         prefs.notifyDaily = s.notifyDaily
@@ -201,15 +252,19 @@ class SettingsViewModel @Inject constructor(
         prefs.dailyHour = s.dailyHour
         prefs.refreshInterval = s.refreshInterval
 
-        ThemeController.amoled = s.amoled
+        ThemeController.applyTheme(s.themeMode)
         runCatching { (context as? App)?.scheduleDailySummary() }
-        ws.disconnect()
-        ws.connect()
-        _saved.value = true
+        if (geminiChanged && prefs.geminiKey.isNotBlank()) refreshGeminiModels()
+        if (wsChanged) {
+            ws.disconnect()
+            ws.connect()
+        }
+        if (!silent) _saved.value = true
     }
 
     fun clearAllKeys() {
         prefs.clearAll()
+        ThemeController.applyTheme("light")
         _state.value = SettingsUi()
         _tests.value = emptyMap()
         _saved.value = false
@@ -304,6 +359,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun testGemini() = test("gemini") { ai.testGemini() }
+    fun testDeepseek() = test("deepseek") { ai.testDeepseek() }
     fun testOpenAi() = test("openai") { ai.testOpenAi() }
     fun testAnthropic() = test("anthropic") { ai.testAnthropic() }
     fun testOllama() = test("ollama") { ai.testOllama() }
@@ -324,14 +380,25 @@ class SettingsViewModel @Inject constructor(
         android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
 
     companion object {
+        /** Static fallback list — key save hote hi API se live list fetch ho jati hai (auto-fill). */
         val GEMINI_MODELS = listOf(
-            "gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-2.0-pro-exp",
-            "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-exp-1206"
+            "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+            "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash-exp",
+            "gemini-2.0-flash-thinking-exp-0121", "gemini-2.0-pro-exp",
+            "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.0-pro",
+            "gemma-3-27b-it", "gemma-3-12b-it", "gemma-2-27b-it",
+            "text-embedding-004", "audio-embedding-001",
+            "imagen-3.0-generate-002", "gemini-2.0-flash-live-001"
         )
-        val OPENAI_MODELS = listOf("gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-preview", "o1-mini")
+        val DEEPSEEK_MODELS = listOf("deepseek-chat", "deepseek-reasoner")
+        val OPENAI_MODELS = listOf(
+            "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
+            "o3-mini", "o1-mini", "gpt-4-turbo"
+        )
         val ANTHROPIC_MODELS = listOf(
-            "claude-sonnet-4-5", "claude-opus-4", "claude-haiku-4-5", "claude-3-5-sonnet-20241022"
+            "claude-sonnet-4-5", "claude-opus-4", "claude-haiku-4-5",
+            "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest"
         )
-        val OLLAMA_MODELS = listOf("llama3:8b", "mistral:7b", "gemma2:9b", "phi3:mini")
+        val OLLAMA_MODELS = listOf("llama3:8b", "mistral:7b", "gemma2:9b", "phi3:mini", "qwen2.5:7b")
     }
 }

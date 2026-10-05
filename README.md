@@ -44,12 +44,13 @@ gh secret set STORE_PASSWORD --body '<password>'
 Keep `keystore.jks` + password backed up — without them the app can never be updated in place on devices.
 
 ## Firebase
-1. Enable **API Keys API** for project `sqlrrr`: https://console.developers.google.com/apis/api/apikeys.googleapis.com/overview?project=605955318342
-2. Download `google-services.json` (Android app `com.rizwan.tradingagentarmy`).
-3. `gh secret set GOOGLE_SERVICES_JSON < app/google-services.json`
-4. Firestore rules: [`firestore.rules`](firestore.rules) (auth‑required; deployed on `cloud.firestore` release channel).
+Configured — `GOOGLE_SERVICES_JSON` secret is set (injected by CI at build time, never committed). Firestore rules: [`firestore.rules`](firestore.rules) (auth‑required; deployed on `cloud.firestore` release channel).
 
-Without these the app still builds and runs — Firebase features stay dormant and everything works locally via Room.
+To rotate the config later:
+1. Firebase console → Project settings → Android app → download `google-services.json`
+2. `gh secret set GOOGLE_SERVICES_JSON < app/google-services.json`
+
+Without the secret the app still builds and runs — Firebase features stay dormant and everything works locally via Room.
 
 ## Stack
 Kotlin 2.0 · Compose BOM 2024.09 · Material 3 · Hilt · Room · Retrofit/OkHttp/kotlinx‑serialization · WorkManager · Firebase BOM 33 · minSdk 26 / target 35.
