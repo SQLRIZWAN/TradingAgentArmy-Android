@@ -126,7 +126,8 @@ class HftEngine @Inject constructor(
             _lastSignal.value = "WAIT · E9=${"%.1f".format(e9)} E21=${"%.1f".format(e21)} RSI=${"%.0f".format(rsi)}"
             return
         }
-        if (now - lastTradeAt < 30_000) return
+        val configuredCooldown = (prefs.getInt("hft_cooldown_sec", 30) * 1000L).coerceAtLeast(1_000L)
+        if (now - lastTradeAt < configuredCooldown) return
         val side = if (long) "LONG" else "SHORT"
         val size = risk.capSize(prefs.getString("hft_size", "10").toDoubleOrNull() ?: 10.0)
         val deny = risk.evaluate(size)
@@ -157,7 +158,6 @@ class HftEngine @Inject constructor(
             val maxSpread = prefs.getString("hft_max_spread_bps", "20").toDoubleOrNull() ?: 20.0
             val slippageBps = prefs.getString("hft_max_slippage_bps", "10").toDoubleOrNull() ?: 10.0
             val feeBps = prefs.getString("hft_fee_bps", "5").toDoubleOrNull() ?: 5.0
-            val cooldown = (prefs.getInt("hft_cooldown_sec", 30) * 1000L).coerceAtLeast(1_000L)
             if (spreadBps > maxSpread) {
                 _lastSignal.value = "BLOCKED: spread ${"%.1f".format(spreadBps)}bps > ${"%.1f".format(maxSpread)}bps"
                 return
@@ -166,7 +166,6 @@ class HftEngine @Inject constructor(
                 _lastSignal.value = "BLOCKED: edge below spread/slippage/fees"
                 return
             }
-            if (now - lastTradeAt < cooldown) return
         }
         if (live) {
             val result = bitget.placeProtected(
