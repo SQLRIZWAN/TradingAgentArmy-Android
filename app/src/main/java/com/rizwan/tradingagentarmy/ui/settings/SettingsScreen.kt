@@ -29,8 +29,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -320,12 +318,18 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeChip("Spot", s.marketType == "SPOT") { vm.update { it.copy(marketType = "SPOT") } }
                     ThemeChip("Futures", s.marketType == "FUTURES") { vm.update { it.copy(marketType = "FUTURES") } }
+                    ThemeChip("CFD", s.marketType == "CFD") { vm.update { it.copy(marketType = "CFD") } }
                 }
                 if (s.marketType == "FUTURES") {
                     PlainField("Product (USDT-FUTURES)", s.futuresProduct) { v -> vm.update { it.copy(futuresProduct = v) } }
                     PlainField("Margin (isolated/crossed)", s.futuresMargin) { v -> vm.update { it.copy(futuresMargin = v) } }
                 }
-                Text("Gold/Forex CFD LIVE orders use Bitget CFD Open API directly. MT5 login is not needed here; use Bitget API keys with UTA trade permission.", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    if (s.marketType == "CFD") "Gold/Forex CFD LIVE orders use Bitget CFD Open API directly. MT5 login is not needed; use Bitget API keys with UTA trade permission and the exact Bitget CFD symbol (for example XAUUSD or XAUUSD.pro)."
+                    else "LIVE orders use exchange API keys. Start in PAPER mode, verify SL/TP and use trade-only permissions; never enable withdrawals.",
+                    color = Tokens.TextSecondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
                 TestRow("mt5", tests["mt5"]) { vm.testMt5() }
             }
 

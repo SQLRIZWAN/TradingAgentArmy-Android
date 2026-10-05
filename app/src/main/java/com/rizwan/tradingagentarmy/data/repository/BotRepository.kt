@@ -127,6 +127,11 @@ class BotRepository @Inject constructor(
 
     private fun mapTrade(e: TradeEntity) = Trade(
         id = e.id, symbol = e.symbol, side = e.side, entry = e.entry, exit = e.exit,
-        pnl = e.pnl, mode = e.mode, botName = e.botName, model = e.model, timestamp = e.timestamp
+        pnl = e.pnl, mode = e.mode, botName = e.botName, model = e.model, timestamp = e.timestamp,
+        clientOid = e.clientOid, exchangeOrderId = e.exchangeOrderId,
+        stopLoss = e.stopLoss, takeProfit = e.takeProfit,
+        slOrderId = e.slOrderId, tpOrderId = e.tpOrderId,
+        status = e.status, marketType = e.marketType, exitReason = e.exitReason,
+        quantity = e.quantity
     )
 }

@@ -35,7 +35,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 
 private val tabs = listOf(
     Tab("chat", "Chat", Icons.Filled.Forum),
-    Tab("dashboard", "Dashboard", Icons.Filled.Dashboard),
+    Tab("dashboard", "Markets", Icons.Filled.Dashboard),
     Tab("bots", "Bots", Icons.Filled.SmartToy),
     Tab("army", "Army", Icons.Filled.Groups),
     Tab("settings", "Settings", Icons.Filled.Tune)
@@ -81,7 +81,7 @@ fun RootApp() {
     ) { padding ->
         NavHost(
             navController = nav,
-            startDestination = "chat",
+            startDestination = "dashboard",
             modifier = Modifier.padding(padding)
         ) {
             composable("chat") { ChatScreen() }

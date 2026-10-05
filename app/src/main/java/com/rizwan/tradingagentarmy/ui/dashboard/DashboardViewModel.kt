@@ -56,6 +56,9 @@ class DashboardViewModel @Inject constructor(
     private val _noBackend = MutableStateFlow(prefs.backendUrl.isBlank())
     val noBackend: StateFlow<Boolean> = _noBackend.asStateFlow()
 
+    private val _liveTrading = MutableStateFlow(prefs.getBool("live_trading", false))
+    val liveTrading: StateFlow<Boolean> = _liveTrading.asStateFlow()
+
     private val _wsConnected = ws.connected
     val wsConnected: StateFlow<Boolean> = _wsConnected
 
@@ -192,6 +195,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     private suspend fun refresh() {
+        _liveTrading.value = prefs.getBool("live_trading", false)
         runCatching {
             val list = marketRepo.watchlist()
             if (list.isNotEmpty()) {
@@ -266,4 +270,3 @@ class DashboardViewModel @Inject constructor(
 }
 
 data class Candle(val o: Float, val h: Float, val l: Float, val c: Float)
-

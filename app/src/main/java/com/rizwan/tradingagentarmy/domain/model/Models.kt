@@ -40,7 +40,17 @@ data class Trade(
     val mode: String,
     val botName: String,
     val model: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val clientOid: String = "",
+    val exchangeOrderId: String = "",
+    val stopLoss: Double? = null,
+    val takeProfit: Double? = null,
+    val slOrderId: String = "",
+    val tpOrderId: String = "",
+    val status: String = "CLOSED",
+    val marketType: String = "SPOT",
+    val exitReason: String = "",
+    val quantity: Double = 0.0
 )
 
 data class MarketTicker(

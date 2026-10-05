@@ -68,11 +68,51 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
     val chartError by viewModel.chartError.collectAsState()
     val candles by viewModel.candles.collectAsState()
     val chartLoading by viewModel.chartLoading.collectAsState()
+    val liveTrading by viewModel.liveTrading.collectAsState()
+    val openTrades = trades.filter { it.status.equals("OPEN", true) || it.status.equals("PAPER_OPEN", true) || it.exit == null }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        item {
+            Column(
+                Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    "Trading command center",
+                    color = Tokens.TextPrimary,
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                Text(
+                    "AI Army · markets · positions · risk",
+                    color = Tokens.TextSecondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        item {
+            Surface(
+                color = if (liveTrading) Tokens.AccentDanger.copy(alpha = 0.10f) else Tokens.AccentPrimary.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            ) {
+                Row(
+                    Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    StatusDot(liveTrading, if (liveTrading) "LIVE TRADING" else "PAPER MODE")
+                    Text(
+                        if (liveTrading) "Real orders enabled — verify exchange keys and SL/TP"
+                        else "Safe virtual mode — no real money is used",
+                        color = Tokens.TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
         // ---- status row ----
         item {
             Row(
@@ -263,6 +303,33 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
             }
         }
 
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Open Positions", color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "${openTrades.size}",
+                    color = Tokens.AccentPrimary,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
+        if (openTrades.isEmpty()) {
+            item {
+                Text(
+                    "No open position — Army ke live/paper trades yahan dikhenge.",
+                    color = Tokens.TextSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
+        } else {
+            items(openTrades, key = { "open-${it.id}" }) { t -> OpenPositionCard(t) }
+        }
+
         // ---- recent trades ----
         item {
             Text(
@@ -313,6 +380,58 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
             }
         }
         item { Box(Modifier.height(8.dp)) }
+    }
+}
+
+@Composable
+private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Trade) {
+    val positive = trade.pnl >= 0
+    Surface(
+        color = Tokens.Surface,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(trade.symbol, color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    " ${trade.side.uppercase()} · ${trade.marketType}",
+                    color = if (trade.side.equals("BUY", true) || trade.side.equals("LONG", true)) Tokens.AccentPrimary else Tokens.AccentDanger,
+                    style = MaterialTheme.typography.labelSmall
+                )
+                Text(
+                    trade.botName,
+                    color = Tokens.TextSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+                Text(
+                    (if (positive) "+" else "") + "%.2f".format(trade.pnl),
+                    color = if (positive) Tokens.AccentPrimary else Tokens.AccentDanger,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = AppFonts.Mono)
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MiniValue("Qty", if (trade.quantity > 0) "%.4f".format(trade.quantity) else "—")
+                MiniValue("Entry", "%.4f".format(trade.entry))
+                MiniValue("SL", trade.stopLoss?.let { "%.4f".format(it) } ?: "—", Tokens.AccentDanger)
+                MiniValue("TP", trade.takeProfit?.let { "%.4f".format(it) } ?: "—", Tokens.AccentPrimary)
+            }
+            Text(
+                if (trade.stopLoss != null && trade.takeProfit != null) "Exchange protection: SL + TP configured"
+                else "Protection pending — do not use LIVE until SL/TP is visible",
+                color = if (trade.stopLoss != null && trade.takeProfit != null) Tokens.AccentPrimary else Tokens.AccentWarning,
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniValue(label: String, value: String, color: androidx.compose.ui.graphics.Color = Tokens.TextSecondary) {
+    Column(Modifier.width(76.dp)) {
+        Text(label, color = Tokens.TextSecondary, style = MaterialTheme.typography.labelSmall)
+        Text(value, color = color, style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono))
     }
 }
 
