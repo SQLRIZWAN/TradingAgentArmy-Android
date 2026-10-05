@@ -15,6 +15,7 @@ import com.rizwan.tradingagentarmy.data.local.SecurePreferences
 import com.rizwan.tradingagentarmy.data.remote.WebSocketManager
 import com.rizwan.tradingagentarmy.notifications.DailySummaryWorker
 import com.rizwan.tradingagentarmy.notifications.Notifier
+import com.rizwan.tradingagentarmy.trading.LiveTradeSupervisor
 import dagger.hilt.android.HiltAndroidApp
 import java.time.Duration
 import java.time.LocalDateTime
@@ -29,6 +30,7 @@ class App : Application(), Configuration.Provider {
     @Inject lateinit var firebaseSync: FirebaseSync
     @Inject lateinit var prefs: SecurePreferences
     @Inject lateinit var ws: WebSocketManager
+    @Inject lateinit var liveSupervisor: LiveTradeSupervisor
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
@@ -42,6 +44,7 @@ class App : Application(), Configuration.Provider {
         firebaseSync.ensureSignedIn()
         firebaseSync.registerFcmWithBackend()
         ws.connect()
+        liveSupervisor.start()
         scheduleDailySummary()
     }
 

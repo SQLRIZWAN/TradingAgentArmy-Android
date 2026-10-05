@@ -33,11 +33,33 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE trades ADD COLUMN clientOid TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE trades ADD COLUMN exchangeOrderId TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE trades ADD COLUMN stopLoss REAL")
+            db.execSQL("ALTER TABLE trades ADD COLUMN takeProfit REAL")
+            db.execSQL("ALTER TABLE trades ADD COLUMN slOrderId TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE trades ADD COLUMN tpOrderId TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE trades ADD COLUMN status TEXT NOT NULL DEFAULT 'CLOSED'")
+            db.execSQL("ALTER TABLE trades ADD COLUMN marketType TEXT NOT NULL DEFAULT 'SPOT'")
+            db.execSQL("ALTER TABLE trades ADD COLUMN exitReason TEXT NOT NULL DEFAULT ''")
+        }
+    }
+
+    private val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE trades ADD COLUMN quantity REAL NOT NULL DEFAULT 0")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDb(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "trading-army.db")
             .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_2_3)
+            .addMigrations(MIGRATION_3_4)
             .fallbackToDestructiveMigration()
             .build()
 

@@ -316,6 +316,17 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
                 SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
                 PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
+                PlainField("MT5 Bridge URL (EA/backend)", s.mt5BridgeUrl) { v -> vm.update { it.copy(mt5BridgeUrl = v) } }
+                Text("Bitget market", color = Tokens.TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemeChip("Spot", s.marketType == "SPOT") { vm.update { it.copy(marketType = "SPOT") } }
+                    ThemeChip("Futures", s.marketType == "FUTURES") { vm.update { it.copy(marketType = "FUTURES") } }
+                }
+                if (s.marketType == "FUTURES") {
+                    PlainField("Product (USDT-FUTURES)", s.futuresProduct) { v -> vm.update { it.copy(futuresProduct = v) } }
+                    PlainField("Margin (isolated/crossed)", s.futuresMargin) { v -> vm.update { it.copy(futuresMargin = v) } }
+                }
+                Text("Futures LIVE orders require product/margin settings and exchange-side protection. MT5 needs a running EA/bridge; Android cannot directly host the MT5 terminal.", color = Tokens.AccentDanger, style = MaterialTheme.typography.bodySmall)
                 TestRow("mt5", tests["mt5"]) { vm.testMt5() }
             }
 
@@ -350,7 +361,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     SwitchRow("24/7 auto rounds (Army screen se START karein)", s.agentsEnabled) { v ->
                         vm.update { it.copy(agentsEnabled = v) }
                     }
-                    SwitchRow("⚡ HFT Scalper engine (fast loop, paper)", s.hftEnabled) { v ->
+                    SwitchRow("⚡ HFT Scalper engine (fast loop)", s.hftEnabled) { v ->
                         vm.update { it.copy(hftEnabled = v) }
                     }
                     HorizontalDivider(color = Tokens.BorderSubtle)

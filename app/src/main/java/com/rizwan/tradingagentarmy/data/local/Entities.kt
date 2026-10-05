@@ -24,7 +24,17 @@ data class TradeEntity(
     val mode: String,
     val botName: String,
     val model: String?,
-    val timestamp: Long
+    val timestamp: Long,
+    val clientOid: String = "",
+    val exchangeOrderId: String = "",
+    val stopLoss: Double? = null,
+    val takeProfit: Double? = null,
+    val slOrderId: String = "",
+    val tpOrderId: String = "",
+    val status: String = "CLOSED",
+    val marketType: String = "SPOT",
+    val exitReason: String = "",
+    val quantity: Double = 0.0
 )
 
 @Entity(tableName = "bots")

@@ -10,6 +10,7 @@ import com.rizwan.tradingagentarmy.data.local.WarMessageEntity
 import com.rizwan.tradingagentarmy.data.remote.AiProviders
 import com.rizwan.tradingagentarmy.notifications.Notifier
 import com.rizwan.tradingagentarmy.trading.BitgetClient
+import com.rizwan.tradingagentarmy.trading.Mt5BridgeClient
 import com.rizwan.tradingagentarmy.trading.RiskGuard
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -30,6 +31,7 @@ class AgentArmy @Inject constructor(
     private val warDao: WarDao,
     private val tradeDao: com.rizwan.tradingagentarmy.data.local.TradeDao,
     private val bitget: BitgetClient,
+    private val mt5: Mt5BridgeClient,
     private val risk: RiskGuard
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -232,26 +234,56 @@ $appLog
             return
         }
         val live = prefs.getBool("live_trading", false)
+        val mt5Symbol = plan.symbol.uppercase().replace("/", "") in setOf("XAUUSD", "EURUSD", "GBPUSD", "USDJPY")
+        val marketType = if (mt5Symbol) "MT5" else prefs.getString("bitget_market_type", "SPOT").uppercase()
         val price = tools.lastPrice(plan.symbol)
-        if (live && !bitget.configured) {
-            post(AgentRole.RISK, "🛑 LIVE mode needs Bitget API keys — falling back to PAPER", kind = "decision")
+        if (live && ((mt5Symbol && !mt5.configured) || (!mt5Symbol && !bitget.configured))) {
+            post(AgentRole.RISK, "🛑 LIVE blocked: ${if (mt5Symbol) "MT5 bridge/login/server" else "Bitget API keys"} are missing", kind = "decision")
+            return
         }
-        val isLive = live && bitget.configured
+        val clientOid = "army_${plan.symbol}_${roundId}_${plan.action.lowercase()}"
+        if (tradeDao.byClientOid(clientOid) != null) {
+            post(AgentRole.RISK, "🛑 DUPLICATE BLOCKED: signal $clientOid already exists", kind = "decision")
+            return
+        }
+        if (live && (plan.stopLoss == null || plan.takeProfit == null)) {
+            post(AgentRole.RISK, "🛑 LIVE blocked: exchange SL and TP are required", kind = "decision")
+            return
+        }
+        if (live && marketType == "SPOT" && plan.action == "SELL") {
+            post(AgentRole.RISK, "🛑 LIVE spot SELL blocked until reconciled base quantity is available", kind = "decision")
+            return
+        }
+        val isLive = live && (if (mt5Symbol) mt5.configured else bitget.configured)
+        var exchangeOrderId = ""
         if (isLive) {
             val side = if (plan.action == "BUY") "buy" else "sell"
-            val res = bitget.placeSpotMarket(plan.symbol, side, size)
+            val res = if (marketType == "MT5") {
+                mt5.placeMarketProtected(plan.symbol, side, if (price > 0) size / price else 0.0, plan.stopLoss!!, plan.takeProfit!!, clientOid)
+            } else {
+                bitget.placeProtected(marketType, plan.symbol, side, size, price, plan.stopLoss, plan.takeProfit, clientOid)
+            }
             if (!res.ok) {
-                post(AgentRole.RISK, "❌ Bitget order failed: ${res.message}", kind = "decision")
+                post(AgentRole.RISK, "❌ ${if (marketType == "MT5") "MT5" else "Bitget"} order failed: ${res.message}", kind = "decision")
                 Notifier.post(context, "agent_army", "❌ Order failed", res.message, high = true)
                 return
             }
+            if (res.orderId.isBlank()) {
+                post(AgentRole.RISK, "🛑 LIVE blocked: exchange returned no order id", kind = "decision")
+                return
+            }
+            exchangeOrderId = res.orderId
         }
         tradeDao.insert(
             TradeEntity(
                 symbol = plan.symbol, side = plan.action, entry = price, exit = null,
                 pnl = 0.0, mode = if (isLive) "live" else "paper",
                 botName = "AI Army", model = prefs.pinnedModel.ifBlank { "auto-chain" },
-                timestamp = System.currentTimeMillis()
+                timestamp = System.currentTimeMillis(), clientOid = clientOid,
+                exchangeOrderId = exchangeOrderId,
+                stopLoss = plan.stopLoss, takeProfit = plan.takeProfit,
+                status = if (isLive) "OPEN" else "PAPER_OPEN", marketType = marketType,
+                quantity = if (price > 0.0) size / price else 0.0
             )
         )
         val mode = if (isLive) "LIVE" else "PAPER"

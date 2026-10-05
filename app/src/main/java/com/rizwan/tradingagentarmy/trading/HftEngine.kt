@@ -27,7 +27,8 @@ class HftEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val prefs: SecurePreferences,
     private val tradeDao: TradeDao,
-    private val risk: RiskGuard
+    private val risk: RiskGuard,
+    private val bitget: BitgetClient
 ) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).build()
@@ -114,6 +115,29 @@ class HftEngine @Inject constructor(
             AppEvents.record("hft", "blocked: $deny")
             return
         }
+        val live = prefs.getBool("live_trading", false)
+        val marketType = prefs.getString("bitget_market_type", "SPOT").uppercase()
+        if (live && !bitget.configured) {
+            _lastSignal.value = "BLOCKED: Bitget keys missing"
+            return
+        }
+        if (live && marketType == "SPOT" && side == "SHORT") {
+            _lastSignal.value = "BLOCKED: spot HFT short is unsupported"
+            return
+        }
+        val stop = if (side == "LONG") price * 0.9985 else price * 1.0015
+        val take = if (side == "LONG") price * 1.0015 else price * 0.9985
+        if (live) {
+            val result = bitget.placeProtected(
+                marketType, symbol, if (side == "LONG") "buy" else "sell", size, price,
+                stop, take, "hft_${symbol}_${now}"
+            )
+            if (!result.ok || result.orderId.isBlank()) {
+                _lastSignal.value = "BLOCKED: live order/protection failed"
+                AppEvents.record("hft", "live entry failed: ${result.message}")
+                return
+            }
+        }
         lastTradeAt = now
         posSide = side
         posEntry = price
@@ -125,8 +149,22 @@ class HftEngine @Inject constructor(
     private suspend fun closePosition(price: Double, reason: String) {
         val side = posSide
         val entry = posEntry
-        val pnl = (if (side == "LONG") price - entry else entry - price) *
-            (prefs.getString("hft_size", "10").toDoubleOrNull() ?: 10.0) / entry
+        val notional = prefs.getString("hft_size", "10").toDoubleOrNull() ?: 10.0
+        val marketType = prefs.getString("bitget_market_type", "SPOT").uppercase()
+        if (prefs.getBool("live_trading", false)) {
+            val qty = notional / entry
+            val result = if (marketType == "FUTURES") {
+                bitget.closeFuturesMarket(prefs.getString("army_symbol", "BTCUSDT"), if (side == "LONG") "sell" else "buy", "%.8f".format(qty), "hft_exit_${System.currentTimeMillis()}")
+            } else {
+                bitget.closeSpotMarket(prefs.getString("army_symbol", "BTCUSDT"), "sell", qty, "hft_exit_${System.currentTimeMillis()}")
+            }
+            if (!result.ok) {
+                AppEvents.record("hft", "live exit failed: ${result.message}")
+                _lastSignal.value = "EXIT FAILED — manual check required"
+                return
+            }
+        }
+        val pnl = (if (side == "LONG") price - entry else entry - price) * notional / entry
         tradeDao.insert(
             TradeEntity(
                 symbol = prefs.getString("army_symbol", "BTCUSDT"), side = side,

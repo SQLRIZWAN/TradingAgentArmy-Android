@@ -46,6 +46,21 @@ interface TradeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: TradeEntity): Long
+
+    @Query("SELECT * FROM trades WHERE status = 'OPEN' ORDER BY timestamp ASC")
+    suspend fun openTrades(): List<TradeEntity>
+
+    @Query("SELECT * FROM trades WHERE clientOid = :clientOid LIMIT 1")
+    suspend fun byClientOid(clientOid: String): TradeEntity?
+
+    @Query("UPDATE trades SET exchangeOrderId = :orderId, slOrderId = :slOrderId, tpOrderId = :tpOrderId, status = :status WHERE id = :id")
+    suspend fun updateExchangeProtection(id: Long, orderId: String, slOrderId: String, tpOrderId: String, status: String)
+
+    @Query("UPDATE trades SET exit = :exit, pnl = :pnl, status = 'CLOSED', exitReason = :reason WHERE id = :id")
+    suspend fun closeTrade(id: Long, exit: Double, pnl: Double, reason: String)
+
+    @Query("UPDATE trades SET status = :status WHERE id = :id")
+    suspend fun setStatus(id: Long, status: String)
 }
 
 @Dao

@@ -82,6 +82,10 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         get() = getString(K_MT5_SERVER)
         set(v) = putString(K_MT5_SERVER, v)
 
+    var mt5BridgeUrl: String
+        get() = getString(K_MT5_BRIDGE_URL)
+        set(v) = putString(K_MT5_BRIDGE_URL, v)
+
     // ---- AI keys ----
     var geminiKey: String
         get() = getString(K_GEMINI_KEY)
@@ -187,6 +191,7 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         const val K_MT5_LOGIN = "mt5_login"
         const val K_MT5_PASSWORD = "mt5_password"
         const val K_MT5_SERVER = "mt5_server"
+        const val K_MT5_BRIDGE_URL = "mt5_bridge_url"
         const val K_GEMINI_KEY = "gemini_key"
         const val K_GEMINI_MODEL = "gemini_model"
         const val K_DEEPSEEK_KEY = "deepseek_key"
