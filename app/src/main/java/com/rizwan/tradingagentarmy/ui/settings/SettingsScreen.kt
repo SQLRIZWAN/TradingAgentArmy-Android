@@ -316,7 +316,6 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
                 SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
                 PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
-                PlainField("MT5 Bridge URL (EA/backend)", s.mt5BridgeUrl) { v -> vm.update { it.copy(mt5BridgeUrl = v) } }
                 Text("Bitget market", color = Tokens.TextPrimary, style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeChip("Spot", s.marketType == "SPOT") { vm.update { it.copy(marketType = "SPOT") } }
@@ -326,7 +325,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     PlainField("Product (USDT-FUTURES)", s.futuresProduct) { v -> vm.update { it.copy(futuresProduct = v) } }
                     PlainField("Margin (isolated/crossed)", s.futuresMargin) { v -> vm.update { it.copy(futuresMargin = v) } }
                 }
-                Text("Futures LIVE orders require product/margin settings and exchange-side protection. MT5 needs a running EA/bridge; Android cannot directly host the MT5 terminal.", color = Tokens.AccentDanger, style = MaterialTheme.typography.bodySmall)
+                Text("Gold/Forex CFD LIVE orders use Bitget CFD Open API directly. MT5 login is not needed here; use Bitget API keys with UTA trade permission.", color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall)
                 TestRow("mt5", tests["mt5"]) { vm.testMt5() }
             }
 

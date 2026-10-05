@@ -153,7 +153,9 @@ class HftEngine @Inject constructor(
         val marketType = prefs.getString("bitget_market_type", "SPOT").uppercase()
         if (prefs.getBool("live_trading", false)) {
             val qty = notional / entry
-            val result = if (marketType == "FUTURES") {
+            val result = if (marketType == "CFD") {
+                bitget.closeCfd(prefs.getString("army_symbol", "XAUUSD"))
+            } else if (marketType == "FUTURES") {
                 bitget.closeFuturesMarket(prefs.getString("army_symbol", "BTCUSDT"), if (side == "LONG") "sell" else "buy", "%.8f".format(qty), "hft_exit_${System.currentTimeMillis()}")
             } else {
                 bitget.closeSpotMarket(prefs.getString("army_symbol", "BTCUSDT"), "sell", qty, "hft_exit_${System.currentTimeMillis()}")

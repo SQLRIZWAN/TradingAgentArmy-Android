@@ -32,7 +32,6 @@ data class SettingsUi(
     val mt5Login: String = "",
     val mt5Password: String = "",
     val mt5Server: String = "",
-    val mt5BridgeUrl: String = "",
     val marketType: String = "SPOT",
     val futuresProduct: String = "USDT-FUTURES",
     val futuresMargin: String = "isolated",
@@ -104,7 +103,6 @@ class SettingsViewModel @Inject constructor(
             mt5Login = prefs.mt5Login,
             mt5Password = prefs.mt5Password,
             mt5Server = prefs.mt5Server,
-            mt5BridgeUrl = prefs.mt5BridgeUrl,
             marketType = prefs.getString("bitget_market_type", "SPOT"),
             futuresProduct = prefs.getString("bitget_product_type", "USDT-FUTURES"),
             futuresMargin = prefs.getString("bitget_margin_mode", "isolated"),
@@ -253,7 +251,6 @@ class SettingsViewModel @Inject constructor(
         prefs.mt5Login = s.mt5Login.trim()
         prefs.mt5Password = s.mt5Password.trim()
         prefs.mt5Server = s.mt5Server.trim()
-        prefs.mt5BridgeUrl = s.mt5BridgeUrl.trim()
         prefs.putString("bitget_market_type", s.marketType)
         prefs.putString("bitget_product_type", s.futuresProduct.trim().ifBlank { "USDT-FUTURES" })
         prefs.putString("bitget_margin_mode", s.futuresMargin.trim().ifBlank { "isolated" })

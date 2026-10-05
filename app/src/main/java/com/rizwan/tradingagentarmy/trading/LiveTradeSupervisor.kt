@@ -27,8 +27,7 @@ class LiveTradeSupervisor @Inject constructor(
     private val prefs: SecurePreferences,
     private val trades: TradeDao,
     private val tools: AgentTools,
-    private val bitget: BitgetClient,
-    private val mt5: Mt5BridgeClient
+    private val bitget: BitgetClient
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var started = false
@@ -51,7 +50,7 @@ class LiveTradeSupervisor @Inject constructor(
         val open = trades.openTrades()
         open.groupBy { it.marketType }.forEach { (market, rows) ->
             val result = if (market == "FUTURES") bitget.currentFuturesPositions()
-            else if (market == "MT5") (mt5.configured to "MT5 bridge configured")
+            else if (market == "CFD") bitget.currentCfdPositions(rows.firstOrNull()?.symbol ?: "")
             else bitget.currentSpotPlans(rows.firstOrNull()?.symbol ?: prefs.getString("army_symbol", "BTCUSDT"))
             AppEvents.record("reconcile", "${market.lowercase()} exchange snapshot ok=${result.first}, localOpen=${rows.size}")
         }
@@ -76,8 +75,8 @@ class LiveTradeSupervisor @Inject constructor(
             trades.setStatus(trade.id, "EXIT_PENDING")
             val closeSide = if (trade.side == "BUY") "sell" else "buy"
             val oid = "exit_${trade.clientOid.ifBlank { trade.id.toString() }}_$hit"
-            val result = if (trade.marketType == "MT5") {
-                mt5.close(trade.symbol, closeSide, trade.quantity, oid)
+            val result = if (trade.marketType == "CFD") {
+                bitget.closeCfd(trade.symbol)
             } else if (trade.marketType == "FUTURES") {
                 bitget.closeFuturesMarket(trade.symbol, closeSide, "%.8f".format(trade.quantity), oid)
             } else {

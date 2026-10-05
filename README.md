@@ -12,7 +12,7 @@ Production Android client for the TradingAgentArmy fleet (package `com.rizwan.tr
 - **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents chat in a War Room, read the trade DB (past results), search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications.
 - **⚡ HFT Scalper** — fast loop (2s ticks, EMA 9/21 cross + RSI) with risk guards, paper by default.
 - **🏦 Bitget** — HMAC v2 Spot/Futures orders with deterministic client IDs, exchange-side preset TP/SL, duplicate guards and a restart watchdog. PAPER remains the default.
-- **🪙 MT5 CFD bridge** — XAUUSD/EURUSD-style symbols can route through a user-hosted MT5 EA/bridge. Android stores the login/server encrypted, but the MT5 terminal must run on a VPS/PC; the app blocks LIVE MT5 without a configured bridge.
+- **🪙 Bitget CFD/MT5 account** — XAUUSD/EURUSD-style symbols route through Bitget's direct CFD Open API with exchange-side TP/SL and position queries. No separate server or MT5 terminal is required for this app path.
 - **📱 On-device model** — select a Gemma `.task` file (Settings → Local Model) and chat/agents run fully offline via MediaPipe.
 - **Settings** — tabbed: AI Keys / Local Model / Exchange / Backend / Army / Look. Auto-save on typing. encrypted exchange API keys (Bitget / Binance / Bybit / MT5) with connection tests, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
 - **Notifications** — trade alerts, bot crash, circuit breaker, daily P&L summary (WorkManager, on‑demand init).
@@ -64,7 +64,7 @@ Without the secret the app still builds and runs — Firebase features stay dorm
 
 Live Army entries require a non-HOLD plan with both SL and TP. Bitget Spot/Futures opening orders send exchange-side protection fields, and the app persists an OPEN trade with a deterministic `clientOid`. A foreground watchdog checks local open trades after restart and can issue a secondary exit for a kill-switch or local SL/TP hit. Exchange-side protection is primary; this is not a guarantee against exchange outages, slippage, rejected orders or network failure. Use API keys without withdrawal permission and validate on a demo/small account first.
 
-For MT5, configure the bridge URL plus login/server in Settings. The bridge contract is `POST /api/mt5/order` and `POST /api/mt5/close`, returning `{ "ok": true, "orderId": "...", "clientOid": "..." }`. The bridge/EA is responsible for MT5 authentication, symbol mapping, broker volume rules and exchange-confirmed SL/TP.
+For Bitget CFD/MT5, create the CFD account in Bitget first, then create API keys with UTA trade/read permission. The account's CFD mode determines the symbol suffix (`XAUUSD`, `XAUUSD.s`, or `XAUUSD.pro`); configure the matching symbol in the app.
 
 ## Stack
 Kotlin 2.0 · Compose BOM 2024.09 · Material 3 · Hilt · Room · Retrofit/OkHttp/kotlinx‑serialization · WorkManager · Firebase BOM 33 · minSdk 26 / target 35.

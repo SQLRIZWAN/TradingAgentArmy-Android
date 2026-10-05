@@ -116,6 +116,7 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
 
     suspend fun placeProtected(marketType: String, symbol: String, side: String, quoteUsd: Double, referencePrice: Double, stopLoss: Double?, takeProfit: Double?, clientOid: String): OrderResult =
         if (marketType == "FUTURES") placeFuturesMarketProtected(symbol, side, quoteUsd, referencePrice, stopLoss, takeProfit, clientOid)
+        else if (marketType == "CFD") placeCfdMarketProtected(symbol, side, quoteUsd, referencePrice, stopLoss, takeProfit, clientOid)
         else placeSpotMarketProtected(symbol, side, quoteUsd, stopLoss, takeProfit, clientOid)
 
     suspend fun closeFuturesMarket(symbol: String, side: String, size: String, clientOid: String): OrderResult {
@@ -144,6 +145,36 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
     suspend fun currentFuturesPositions(): Pair<Boolean, String> {
         val product = prefs.getString("bitget_product_type", "USDT-FUTURES")
         val (code, body) = call("GET", "/api/v2/mix/position/all-position?productType=$product&marginCoin=USDT")
+        return (code in 200..299 && parse(body).ok) to body
+    }
+
+    /** Bitget CFD/MT5 account Open API: direct XAUUSD/forex execution. */
+    suspend fun placeCfdMarketProtected(symbol: String, side: String, quoteUsd: Double, referencePrice: Double, stopLoss: Double?, takeProfit: Double?, clientOid: String): OrderResult {
+        if (!configured) return OrderResult(false, "Bitget API keys missing")
+        if (referencePrice <= 0.0) return OrderResult(false, "Invalid CFD reference price")
+        val qty = quoteUsd / referencePrice
+        val payload = buildString {
+            append("{\"symbol\":\"${symbol.uppercase()}\",\"orderType\":\"market\",\"side\":\"${side.lowercase()}\",\"qty\":\"${"%.8f".format(Locale.US, qty)}\"")
+            if (takeProfit != null) append(",\"takeProfit\":\"${price(takeProfit)}\"")
+            if (stopLoss != null) append(",\"stopLoss\":\"${price(stopLoss)}\"")
+            if (clientOid.isNotBlank()) append(",\"clientOid\":\"$clientOid\"")
+            append("}")
+        }
+        val (code, body) = call("POST", "/api/v3/cfd/trade/place-order", payload)
+        val r = parse(body)
+        return result(body, r.ok, if (r.ok) "OK" else "HTTP $code · ${r.message}")
+    }
+
+    suspend fun closeCfd(symbol: String): OrderResult {
+        val payload = """{"symbol":"${symbol.uppercase()}"}"""
+        val (code, body) = call("POST", "/api/v3/cfd/trade/close-all-positions", payload)
+        val r = parse(body)
+        return result(body, r.ok, if (r.ok) "OK" else "HTTP $code · ${r.message}")
+    }
+
+    suspend fun currentCfdPositions(symbol: String = ""): Pair<Boolean, String> {
+        val query = if (symbol.isBlank()) "" else "?symbol=${symbol.uppercase()}"
+        val (code, body) = call("GET", "/api/v3/cfd/trade/current-positions$query")
         return (code in 200..299 && parse(body).ok) to body
     }
 
