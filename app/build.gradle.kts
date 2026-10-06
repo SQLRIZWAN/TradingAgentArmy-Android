@@ -24,7 +24,7 @@ android {
         applicationId = "com.rizwan.tradingagentarmy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
+        versionCode = 12
         versionName = "3.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
