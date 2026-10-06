@@ -52,6 +52,19 @@
             android:foregroundServiceType="dataSync" />
 
         <provider
+            android:name=".CrashCatcherProvider"
+            android:authorities="${applicationId}.crashcatcher"
+            android:exported="false" />
+
+        <activity
+            android:name=".CrashActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:finishOnCloseSystemDialogs="true"
+            android:process=":crash"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"

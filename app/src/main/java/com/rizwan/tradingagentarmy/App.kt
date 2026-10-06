@@ -37,6 +37,7 @@ class App : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        CrashCatcher.install(this)
         instance = this
         com.rizwan.tradingagentarmy.ui.theme.ThemeController.applyTheme(prefs.themeMode)
         createChannels()
