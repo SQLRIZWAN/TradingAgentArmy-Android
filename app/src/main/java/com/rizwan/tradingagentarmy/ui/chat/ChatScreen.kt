@@ -63,6 +63,7 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     val busy by viewModel.busy.collectAsState()
     val streamingId by viewModel.streamingId.collectAsState()
     val streamText by viewModel.streamText.collectAsState()
+    val armyActivity by viewModel.armyActivity.collectAsState()
     val modelChip by viewModel.modelChip.collectAsState()
     val banner by viewModel.banner.collectAsState()
     val input by viewModel.input.collectAsState()
@@ -132,6 +133,16 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             }
         }
         if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Tokens.AccentPrimary)
+        if (busy && streamText.startsWith("Army team")) {
+            Surface(color=Tokens.Surface,modifier=Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=4.dp),shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+                Column(Modifier.padding(horizontal=12.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    Text(streamText,style=MaterialTheme.typography.labelMedium,color=Tokens.AccentPrimary)
+                    armyActivity.take(3).forEach { event ->
+                        Text("${event.agent.displayName}: ${event.content.take(120)}",style=MaterialTheme.typography.labelSmall,color=Tokens.TextSecondary,maxLines=2)
+                    }
+                }
+            }
+        }
 
         LazyColumn(
             state = listState,

@@ -31,6 +31,8 @@ class ChatViewModel @Inject constructor(
     private val army: AgentArmy
 ) : ViewModel() {
 
+    val armyActivity = army.messages
+
     val messages: StateFlow<List<ChatMessage>> =
         repo.messages().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
