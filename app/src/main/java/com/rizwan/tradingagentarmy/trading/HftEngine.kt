@@ -111,12 +111,21 @@ class HftEngine @Inject constructor(
         val now = System.currentTimeMillis()
 
         if (posSide.isNotEmpty()) {
-            val tp = posEntry * (if (posSide == "LONG") 1.0015 else 0.9985)
-            val sl = posEntry * (if (posSide == "LONG") 0.9985 else 1.0015)
-            val takeProfit = if (posSide == "LONG") price >= tp else price <= tp
-            val stopLoss = if (posSide == "LONG") price <= sl else price >= sl
+            val tpPct = risk.scalpTpPct / 100.0
+            val slPct = risk.scalpSlPct / 100.0
+            val tp = posEntry * (if (posSide == "LONG") 1 + tpPct else 1 - tpPct)
+            val sl = posEntry * (if (posSide == "LONG") 1 - slPct else 1 + slPct)
+            val notional = prefs.getString("hft_size", "10").toDoubleOrNull() ?: 10.0
+            val pnlUsd = if (posSide == "LONG") (price / posEntry - 1.0) * notional
+            else (1.0 - price / posEntry) * notional
+            val takeProfit = price >= tp || price <= tp && posSide == "SHORT" ||
+                (if (posSide == "LONG") price >= tp else price <= tp) || pnlUsd >= risk.scalpTargetUsd
+            val stopLoss = if (posSide == "LONG") price <= sl || pnlUsd <= -risk.scalpTargetUsd
+            else price >= sl || pnlUsd <= -risk.scalpTargetUsd
             val exitSignal = (posSide == "LONG" && crossDown) || (posSide == "SHORT" && crossUp)
-            if (takeProfit || stopLoss || exitSignal) closePosition(price, if (takeProfit) "TP" else if (stopLoss) "SL" else "X")
+            if (takeProfit || stopLoss || exitSignal) {
+                closePosition(price, if (takeProfit) "TP" else if (stopLoss) "SL" else "X")
+            }
             return
         }
 
@@ -126,17 +135,17 @@ class HftEngine @Inject constructor(
             _lastSignal.value = "WAIT · E9=${"%.1f".format(e9)} E21=${"%.1f".format(e21)} RSI=${"%.0f".format(rsi)}"
             return
         }
-        val configuredCooldown = (prefs.getInt("hft_cooldown_sec", 30) * 1000L).coerceAtLeast(1_000L)
+        val configuredCooldown = (prefs.getInt("hft_cooldown_sec", 5) * 1000L).coerceAtLeast(500L)
         if (now - lastTradeAt < configuredCooldown) return
         val side = if (long) "LONG" else "SHORT"
         val size = risk.capSize(prefs.getString("hft_size", "10").toDoubleOrNull() ?: 10.0)
-        val deny = risk.evaluate(size)
+        val live = prefs.getBool("live_trading", false)
+        val deny = risk.evaluate(size, live)
         if (deny != null) {
             _lastSignal.value = "BLOCKED: $deny"
             AppEvents.record("hft", "blocked: $deny")
             return
         }
-        val live = prefs.getBool("live_trading", false)
         val marketType = prefs.getString("bitget_market_type", "SPOT").uppercase()
         if (live && !bitget.configured) {
             _lastSignal.value = "BLOCKED: Bitget keys missing"
@@ -146,8 +155,10 @@ class HftEngine @Inject constructor(
             _lastSignal.value = "BLOCKED: spot HFT short is unsupported"
             return
         }
-        val stop = if (side == "LONG") price * 0.9985 else price * 1.0015
-        val take = if (side == "LONG") price * 1.0015 else price * 0.9985
+        val slPct = risk.scalpSlPct / 100.0
+        val tpPct = risk.scalpTpPct / 100.0
+        val stop = if (side == "LONG") price * (1 - slPct) else price * (1 + slPct)
+        val take = if (side == "LONG") price * (1 + tpPct) else price * (1 - tpPct)
         var resultOrderId = ""
         if (marketType == "CFD") {
             val quote = bitget.cfdQuote(symbol).getOrElse {

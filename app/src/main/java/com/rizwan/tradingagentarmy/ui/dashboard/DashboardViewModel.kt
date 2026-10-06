@@ -3,8 +3,12 @@ package com.rizwan.tradingagentarmy.ui.dashboard
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.rizwan.tradingagentarmy.agents.AgentArmy
+import com.rizwan.tradingagentarmy.agents.AgentArmyService
+import com.rizwan.tradingagentarmy.agents.AgentRole
 import com.rizwan.tradingagentarmy.data.local.SecurePreferences
 import com.rizwan.tradingagentarmy.data.local.TradeDao
+import com.rizwan.tradingagentarmy.data.remote.AiProviders
 import com.rizwan.tradingagentarmy.data.remote.WebSocketManager
 import com.rizwan.tradingagentarmy.data.repository.BotRepository
 import com.rizwan.tradingagentarmy.data.repository.MarketRepository
@@ -23,13 +27,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
+
+data class AgentCard(
+    val role: AgentRole,
+    val lastActive: Long,
+    val runs: Int,
+    val live: Boolean
+)
+
+data class ApiLine(
+    val label: String,
+    val detail: String,
+    val state: Int // 0 = ok, 1 = warn, 2 = down
+)
 
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
@@ -39,7 +52,9 @@ class DashboardViewModel @Inject constructor(
     private val tradeDao: TradeDao,
     private val prefs: SecurePreferences,
     private val ws: WebSocketManager,
-    private val bitget: BitgetClient
+    private val bitget: BitgetClient,
+    private val army: AgentArmy,
+    private val ai: AiProviders
 ) : ViewModel() {
 
     private val _tickers = MutableStateFlow<List<MarketTicker>>(emptyList())
@@ -50,6 +65,9 @@ class DashboardViewModel @Inject constructor(
 
     private val _trades = MutableStateFlow<List<Trade>>(emptyList())
     val trades: StateFlow<List<Trade>> = _trades.asStateFlow()
+
+    private val _openTrades = MutableStateFlow<List<Trade>>(emptyList())
+    val openTrades: StateFlow<List<Trade>> = _openTrades.asStateFlow()
 
     private val _circuit = MutableStateFlow<WsEvent.CircuitBreaker?>(null)
     val circuit: StateFlow<WsEvent.CircuitBreaker?> = _circuit.asStateFlow()
@@ -69,53 +87,102 @@ class DashboardViewModel @Inject constructor(
     private val _lastSync = MutableStateFlow(0L)
     val lastSync: StateFlow<Long> = _lastSync.asStateFlow()
 
-    private val _selected = MutableStateFlow("BTC/USDT")
-    val selected: StateFlow<String> = _selected.asStateFlow()
+    private val _serviceOn = AgentArmyService.running
+    val serviceOn: StateFlow<Boolean> = _serviceOn
 
-    private val _chartError = MutableStateFlow(false)
-    val chartError: StateFlow<Boolean> = _chartError.asStateFlow()
+    private val _agentsOn = MutableStateFlow(prefs.getBool("agents_enabled", true))
+    val agentsOn: StateFlow<Boolean> = _agentsOn.asStateFlow()
 
-    private val _candles = MutableStateFlow<List<Candle>>(emptyList())
-    val candles: StateFlow<List<Candle>> = _candles.asStateFlow()
+    private val _agentCards = MutableStateFlow<List<AgentCard>>(emptyList())
+    val agentCards: StateFlow<List<AgentCard>> = _agentCards.asStateFlow()
 
-    private val _chartLoading = MutableStateFlow(false)
-    val chartLoading: StateFlow<Boolean> = _chartLoading.asStateFlow()
+    private val _apiLines = MutableStateFlow<List<ApiLine>>(emptyList())
+    val apiLines: StateFlow<List<ApiLine>> = _apiLines.asStateFlow()
 
-    private val _timeframe = MutableStateFlow("15m")
-    val timeframe: StateFlow<String> = _timeframe.asStateFlow()
+    private val _armyStatus = army.status
+    val armyStatus: StateFlow<String> = _armyStatus
 
-    private val chartHttp by lazy {
-        okhttp3.OkHttpClient.Builder()
-            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-    }
+    private val _tradesToday = MutableStateFlow(0)
+    val tradesToday: StateFlow<Int> = _tradesToday.asStateFlow()
+
+    private val _totalTrades = MutableStateFlow(0)
+    val totalTrades: StateFlow<Int> = _totalTrades.asStateFlow()
 
     private var poller: Job? = null
-    private var lastCandleFetch = 0L
 
     init {
         ws.connect()
         viewModelScope.launch {
             ws.events.collect { handle(it) }
         }
+        viewModelScope.launch {
+            while (isActive) {
+                buildAgents()
+                delay(5_000)
+            }
+        }
         startPolling()
-        loadCandles()
     }
 
-    fun selectSymbol(sym: String) {
-        if (_selected.value == sym) return
-        _selected.value = sym
-        loadCandles()
+    /** 24/7 master switch — starts/stops the foreground Army service. */
+    fun toggleArmy(on: Boolean) {
+        prefs.putBool("agents_enabled", on)
+        _agentsOn.value = on
+        if (on) {
+            runCatching { AgentArmyService.start(context) }
+            AppEventLog.record("army", "24/7 army STARTED from dashboard")
+        } else {
+            runCatching { AgentArmyService.stop(context) }
+            AppEventLog.record("army", "24/7 army STOPPED from dashboard")
+        }
     }
 
-    fun setTimeframe(value: String) {
-        if (_timeframe.value == value) return
-        _timeframe.value = value
-        loadCandles()
+    fun runRoundNow() {
+        viewModelScope.launch {
+            if (!AgentArmyService.running.value) runCatching { AgentArmyService.start(context) }
+            army.runRound()
+        }
     }
 
-    fun onChartError() { _chartError.value = true }
+    private fun buildAgents() {
+        val last = army.agentLast.value
+        val runs = army.agentRuns.value
+        val on = _serviceOn.value
+        _agentCards.value = AgentRole.entries.map { role ->
+            val at = last[role.id] ?: 0L
+            AgentCard(role, at, runs[role.id] ?: 0, on && at > 0)
+        }
+        buildApiLines()
+    }
+
+    private fun buildApiLines() {
+        val chain = ai.chain()
+        val aiLine = if (chain.isEmpty()) {
+            ApiLine("AI", "Koi key nahi — Settings → AI", 2)
+        } else {
+            ApiLine("AI", ai.labelOf(chain.first()) + if (chain.size > 1) " +${chain.size - 1} fallback" else "", 0)
+        }
+        val marketType = prefs.getString("bitget_market_type", "SPOT")
+        val demo = prefs.getBool("bitget_demo_mode", false)
+        val exLine = if (bitget.configured) {
+            ApiLine("Exchange", "Bitget ${if (demo) "DEMO" else "REAL"} · $marketType", 0)
+        } else {
+            ApiLine("Exchange", "Public data (API keys nahi)", 1)
+        }
+        val feedLine = if (_wsConnected.value) {
+            ApiLine("Feed", "WebSocket live", 0)
+        } else {
+            ApiLine("Feed", "REST polling", 1)
+        }
+        val backLine = when {
+            _backendAlive.value -> ApiLine("Backend", "Connected", 0)
+            _noBackend.value -> ApiLine("Backend", "On-device mode", 1)
+            else -> ApiLine("Backend", "Offline", 2)
+        }
+        val pnlSource = if (_portfolio.value?.fromBackend == true) "backend" else "local DB"
+        val dataLine = ApiLine("PnL source", pnlSource, 0)
+        _apiLines.value = listOf(aiLine, exLine, feedLine, backLine, dataLine)
+    }
 
     fun closePosition(id: Long) {
         viewModelScope.launch {
@@ -155,129 +222,14 @@ class DashboardViewModel @Inject constructor(
     }
 
     private suspend fun toolsLastPrice(symbol: String): Double =
-        if (isCfdSymbol(symbol)) bitget.cfdPrice(symbol).getOrDefault(0.0)
-        else runCatching {
+        if (symbol.uppercase().replace("/", "") in setOf("XAUUSD", "EURUSD", "GBPUSD", "USDJPY")) {
+            bitget.cfdPrice(symbol).getOrDefault(0.0)
+        } else runCatching {
             val body = okhttp3.OkHttpClient().newCall(
                 okhttp3.Request.Builder().url("https://api.binance.com/api/v3/ticker/price?symbol=${symbol.replace("/", "").uppercase()}").build()
             ).execute().use { it.body?.string().orEmpty() }
             Regex("\"price\":\"([0-9.]+)\"").find(body)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
         }.getOrDefault(0.0)
-
-    fun loadCandles() {
-        viewModelScope.launch {
-            _chartLoading.value = true
-            _chartError.value = false
-            val result = runCatching {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    fetchCandles(_selected.value)
-                }
-            }
-            result.onSuccess { list ->
-                _candles.value = list
-                if (list.isEmpty()) _chartError.value = true
-            }.onFailure {
-                _chartError.value = true
-            }
-            _chartLoading.value = false
-        }
-    }
-
-    private suspend fun fetchCandles(sym: String): List<Candle> {
-        if (isCfdSymbol(sym)) {
-            val requested = _timeframe.value
-            val apiInterval = if (requested == "5m") "1m" else requested.lowercase()
-            val raw = bitget.cfdCandles(
-                symbol = sym.replace("/", "").uppercase(),
-                interval = apiInterval,
-                side = "buy",
-                limit = 100
-            ).getOrThrow().map { Candle(it.ts, it.open.toFloat(), it.high.toFloat(), it.low.toFloat(), it.close.toFloat(), 0f) }
-            return raw.aggregate(requested)
-        }
-        val binancePair = when (sym) {
-            "BTC/USDT" -> "BTCUSDT"
-            "ETH/USDT" -> "ETHUSDT"
-            "SOL/USDT" -> "SOLUSDT"
-            else -> null
-        }
-        val url = if (binancePair != null) {
-            "https://api.binance.com/api/v3/klines?symbol=$binancePair&interval=${_timeframe.value.lowercase()}&limit=96"
-        } else {
-            val yahooSym = when (sym) {
-                "XAUUSD" -> "GC=F"
-                "EURUSD" -> "EURUSD=X"
-                "GBPUSD" -> "GBPUSD=X"
-                else -> "GC=F"
-            }
-            "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSym?interval=${if (_timeframe.value == "1D") "1d" else "15m"}&range=${if (_timeframe.value == "1D") "1y" else "6h"}"
-        }
-        val req = okhttp3.Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile")
-            .get().build()
-        chartHttp.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
-            val body = resp.body?.string() ?: throw IllegalStateException("empty")
-            val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
-            if (binancePair != null) {
-                val arr = json.parseToJsonElement(body).jsonArray
-                return arr.mapNotNull { row ->
-                    val a = row.jsonArray
-                    Candle(
-                        ts = a[0].jsonPrimitive.content.toLongOrNull() ?: 0L,
-                        o = a[1].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
-                        h = a[2].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
-                        l = a[3].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
-                        c = a[4].jsonPrimitive.content.toFloatOrNull() ?: return@mapNotNull null,
-                        volume = a[5].jsonPrimitive.content.toFloatOrNull() ?: 0f
-                    )
-                }
-            } else {
-                val chart = json.parseToJsonElement(body).jsonObject["chart"]
-                    ?.jsonObject?.get("result")
-                    ?.jsonArray?.firstOrNull()
-                    ?.jsonObject ?: return emptyList()
-                val quote = chart["indicators"]?.jsonObject?.get("quote")
-                    ?.jsonArray?.firstOrNull()
-                    ?.jsonObject ?: return emptyList()
-                fun arrOf(name: String): List<Double?> =
-                    (quote[name] as? JsonArray)?.map {
-                        (it as? JsonPrimitive)?.content?.toDoubleOrNull()
-                    } ?: emptyList()
-                val opens = arrOf("open"); val highs = arrOf("high")
-                val lows = arrOf("low"); val closes = arrOf("close")
-                return opens.indices.mapNotNull { i ->
-                    val o = opens.getOrNull(i) ?: return@mapNotNull null
-                    val h = highs.getOrNull(i) ?: return@mapNotNull null
-                    val l = lows.getOrNull(i) ?: return@mapNotNull null
-                    val c = closes.getOrNull(i) ?: return@mapNotNull null
-                    Candle(0L, o.toFloat(), h.toFloat(), l.toFloat(), c.toFloat(), 0f)
-                }
-            }
-        }
-    }
-
-    private fun isCfdSymbol(symbol: String): Boolean =
-        symbol.uppercase().replace("/", "") in setOf(
-            "XAUUSD", "XAUUSD.S", "XAUUSD.PRO", "XAGUSD", "XAGUSD.S", "XAGUSD.PRO",
-            "EURUSD", "EURUSD.S", "EURUSD.PRO", "GBPUSD", "GBPUSD.S", "GBPUSD.PRO",
-            "USDJPY", "USDJPY.S", "USDJPY.PRO", "AUDUSD", "USDCAD", "USDCHF"
-        )
-
-    private fun List<Candle>.aggregate(timeframe: String): List<Candle> {
-        if (timeframe != "5m" || size < 2) return this
-        val bucket = 5L * 60_000L
-        return groupBy { (it.ts / bucket) * bucket }.toSortedMap().values.map { group ->
-            Candle(
-                ts = group.first().ts,
-                o = group.first().o,
-                h = group.maxOf { it.h },
-                l = group.minOf { it.l },
-                c = group.last().c,
-                volume = group.sumOf { it.volume.toDouble() }.toFloat()
-            )
-        }
-    }
 
     private fun startPolling() {
         poller?.cancel()
@@ -291,6 +243,7 @@ class DashboardViewModel @Inject constructor(
 
     private suspend fun refresh() {
         _liveTrading.value = prefs.getBool("live_trading", false)
+        _agentsOn.value = prefs.getBool("agents_enabled", true)
         runCatching {
             val list = marketRepo.watchlist()
             if (list.isNotEmpty()) {
@@ -306,15 +259,20 @@ class DashboardViewModel @Inject constructor(
             val today = botRepo.pnlSince(todayStart)
             val total = botRepo.pnlSince(0)
             _portfolio.value = marketRepo.portfolio(today, total)
+            _tradesToday.value = tradeDao.all().count { it.timestamp >= todayStart }
+            _totalTrades.value = tradeDao.all().size
         }
-        runCatching { _trades.value = botRepo.allTrades().take(10) }
+        runCatching {
+            val all = botRepo.allTrades()
+            _trades.value = all.take(12)
+            _openTrades.value = all.filter {
+                it.status.equals("OPEN", true) || it.status.equals("PAPER_OPEN", true) ||
+                    it.status.equals("EXIT_PENDING", true) || it.status.equals("UNKNOWN", true)
+            }
+        }
         _backendAlive.value = marketRepo.backendAlive()
         _lastSync.value = System.currentTimeMillis()
-        val now = System.currentTimeMillis()
-        if (now - lastCandleFetch >= (prefs.refreshInterval.coerceIn(5, 60) * 1000L)) {
-            lastCandleFetch = now
-            loadCandles()
-        }
+        buildAgents()
     }
 
     private fun handle(event: WsEvent) {
@@ -366,7 +324,9 @@ class DashboardViewModel @Inject constructor(
             else -> Unit
         }
     }
-
 }
 
-data class Candle(val ts: Long = 0L, val o: Float, val h: Float, val l: Float, val c: Float, val volume: Float = 0f)
+object AppEventLog {
+    fun record(type: String, detail: String) =
+        com.rizwan.tradingagentarmy.agents.AppEvents.record(type, detail)
+}

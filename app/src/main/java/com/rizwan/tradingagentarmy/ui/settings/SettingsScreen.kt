@@ -116,7 +116,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 contentColor = Tokens.AccentPrimary,
                 edgePadding = 0.dp
             ) {
-                listOf("🔑 AI Keys", "📱 Local Model", "🏦 Exchange", "🌐 Backend", "🤖 Army", "🎨 Look").forEachIndexed { i, label ->
+                listOf("🔑 AI", "🏦 Bitget", "📊 Binance", "📈 Bybit", "🥇 MT5/CFD", "🌐 Backend", "🤖 Army", "🎨 Look").forEachIndexed { i, label ->
                     Tab(
                         selected = settingsTab == i,
                         onClick = { settingsTab = i },
@@ -252,7 +252,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             }
 
             }
-            if (settingsTab == 1) {
+            if (settingsTab == 0) {
                 SectionCard(
                     step = "L",
                     title = "On-Device Model (Local Gemma)",
@@ -288,32 +288,26 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 }
             }
 
-            if (settingsTab == 2) {
-            // ================= ③ EXCHANGES =================
+            if (settingsTab == 1) {
+            // ================= ③a BITGET =================
             SectionCard(
-                step = "③",
-                title = "Exchange API Keys (Live trading)",
-                subtitle = "Optional — sirf tab chahiye jab app se trade execute karwana ho."
+                step = "🏦",
+                title = "Bitget API (Spot · Futures · CFD/Gold)",
+                subtitle = "Bitget par keys bana kar yahan daalein — DEMO aur LIVE dono support hain."
             ) {
                 SecretField("Bitget API Key", s.bitgetKey) { v -> vm.update { it.copy(bitgetKey = v) } }
                 SecretField("Bitget Secret", s.bitgetSecret) { v -> vm.update { it.copy(bitgetSecret = v) } }
                 SecretField("Bitget Passphrase", s.bitgetPassphrase) { v -> vm.update { it.copy(bitgetPassphrase = v) } }
+                SwitchRow("🧪 DEMO trading (paptrading:1 header)", s.bitgetDemo) { v -> vm.setBitgetDemo(v) }
+                Text(
+                    "DEMO setup: Bitget app/site me Demo mode ON rakhte hue API keys banayein, phir yahan ON karein. " +
+                        "Har request par paptrading:1 header jayega aur orders simulated account par fill honge.",
+                    color = Tokens.AccentSecondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
                 TestRow("bitget", tests["bitget"]) { vm.testBitget() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
-                SecretField("Binance API Key", s.binanceKey) { v -> vm.update { it.copy(binanceKey = v) } }
-                SecretField("Binance Secret", s.binanceSecret) { v -> vm.update { it.copy(binanceSecret = v) } }
-                TestRow("binance", tests["binance"]) { vm.testBinance() }
-                HorizontalDivider(color = Tokens.BorderSubtle)
-
-                SecretField("Bybit API Key", s.bybitKey) { v -> vm.update { it.copy(bybitKey = v) } }
-                SecretField("Bybit Secret", s.bybitSecret) { v -> vm.update { it.copy(bybitSecret = v) } }
-                TestRow("bybit", tests["bybit"]) { vm.testBybit() }
-                HorizontalDivider(color = Tokens.BorderSubtle)
-
-                PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
-                SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
-                PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
                 Text("Bitget market", color = Tokens.TextPrimary, style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeChip("Spot", s.marketType == "SPOT") { vm.update { it.copy(marketType = "SPOT") } }
@@ -325,16 +319,72 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     PlainField("Margin (isolated/crossed)", s.futuresMargin) { v -> vm.update { it.copy(futuresMargin = v) } }
                 }
                 Text(
-                    if (s.marketType == "CFD") "Gold/Forex CFD LIVE orders use Bitget CFD Open API directly. MT5 login is not needed; use Bitget API keys with UTA trade permission and the exact Bitget CFD symbol (for example XAUUSD or XAUUSD.pro)."
-                    else "LIVE orders use exchange API keys. Start in PAPER mode, verify SL/TP and use trade-only permissions; never enable withdrawals.",
+                    if (s.marketType == "CFD") "CFD orders Bitget CFD Open API se jaate hain. Gold/Forex ke liye exact symbol suffix chahiye (.s / .pro) — MT5/CFD tab me auto-detect karein."
+                    else "LIVE orders exchange API keys se jaate hain. PAPER me shuru karein, SL/TP verify karein, withdrawal permission kabhi na dein.",
                     color = Tokens.TextSecondary,
                     style = MaterialTheme.typography.bodySmall
                 )
-                TestRow("mt5", tests["mt5"]) { vm.testMt5() }
+            }
             }
 
+            if (settingsTab == 2) {
+            SectionCard(step = "📊", title = "Binance API", subtitle = "Spot data + optional execution ke liye.") {
+                SecretField("Binance API Key", s.binanceKey) { v -> vm.update { it.copy(binanceKey = v) } }
+                SecretField("Binance Secret", s.binanceSecret) { v -> vm.update { it.copy(binanceSecret = v) } }
+                TestRow("binance", tests["binance"]) { vm.testBinance() }
+                Text(
+                    "Read-only key bhi kaam karta hai. Futures ke liye futures permission enable karein.",
+                    color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall
+                )
             }
+            }
+
             if (settingsTab == 3) {
+            SectionCard(step = "📈", title = "Bybit API", subtitle = "Bybit V5 unified account ke liye.") {
+                SecretField("Bybit API Key", s.bybitKey) { v -> vm.update { it.copy(bybitKey = v) } }
+                SecretField("Bybit Secret", s.bybitSecret) { v -> vm.update { it.copy(bybitSecret = v) } }
+                TestRow("bybit", tests["bybit"]) { vm.testBybit() }
+            }
+            }
+
+            if (settingsTab == 4) {
+            // ================= ③b MT5 / CFD =================
+            SectionCard(
+                step = "🥇",
+                title = "MT5 / CFD Account (Gold & Forex)",
+                subtitle = "Bitget CFD account = MT5 login. Account site par khol lein, API se nahi khulta."
+            ) {
+                PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
+                SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
+                PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
+                TestRow("mt5", tests["mt5"]) { vm.testMt5() }
+                HorizontalDivider(color = Tokens.BorderSubtle)
+
+                TestRow("cfd", tests["cfd"]) { vm.testCfd() }
+                Text(
+                    "Ye real CFD account check hai (/api/v3/cfd/account/fund-detail). " +
+                        "Agar account nahi mila to bitget.com ya Bitget app se MT5/CFD account kholein — " +
+                        "uske baad API key ke saath yahan OK aayega.",
+                    color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall
+                )
+
+                PlainField("CFD symbol suffix (auto ya manual, jaise .s / .pro)", s.cfdSuffix) { v ->
+                    vm.update { it.copy(cfdSuffix = v) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { vm.detectCfdSuffix() }) {
+                        Text("🔎 Auto-detect", color = Tokens.AccentPrimary)
+                    }
+                    TestRow("cfd_suffix", tests["cfd_suffix"]) { }
+                }
+                Text(
+                    "XAUUSD, EURUSD jaise symbols account mode ke hisaab se .s / .pro suffix lete hain. " +
+                        "Auto-detect karne ke baad army aur bots wahi exact symbol use karenge.",
+                    color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall
+                )
+            }
+            }
+            if (settingsTab == 5) {
             // ================= ④ BACKEND =================
             SectionCard(
                 step = "④",
@@ -352,7 +402,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             }
 
             }
-            if (settingsTab == 4) {
+            if (settingsTab == 6) {
                 SectionCard(
                     step = "A",
                     title = "Agent Army + HFT (24/7)",
@@ -367,8 +417,11 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     SwitchRow("⚡ HFT Scalper engine (fast loop)", s.hftEnabled) { v ->
                         vm.update { it.copy(hftEnabled = v) }
                     }
+                    SwitchRow("⏱️ Har 1 minute me ek agent autonomous scan kare", s.minuteTick) { v ->
+                        vm.update { it.copy(minuteTick = v) }
+                    }
                     HorizontalDivider(color = Tokens.BorderSubtle)
-                    SwitchRow("🔴 LIVE trading — real money (Exchange tab me Bitget keys chahiye)", s.liveTrading) { v ->
+                    SwitchRow("🔴 LIVE trading — real money (Bitget tab me keys chahiye)", s.liveTrading) { v ->
                         vm.update { it.copy(liveTrading = v) }
                     }
                     Text(
@@ -380,24 +433,33 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 }
                 SectionCard(
                     step = "R",
-                    title = "Risk & execution guardrails",
-                    subtitle = "Ye limits har AI/HFT entry se pehle apply hoti hain. Values USD/basis-points mein hain."
+                    title = "Risk & scalping guardrails",
+                    subtitle = "Relaxed scalping defaults — army ko trade karne dete hain. Values USD / percent me hain."
                 ) {
                     PlainField("Maximum daily loss (USD)", s.maxDailyLossUsd) { v -> vm.update { it.copy(maxDailyLossUsd = v) } }
                     PlainField("Maximum trade size (USD)", s.maxTradeUsd) { v -> vm.update { it.copy(maxTradeUsd = v) } }
+                    PlainField("Max trades per day (20000 = unlimited)", s.maxTradesDay) { v -> vm.update { it.copy(maxTradesDay = v) } }
+                    SwitchRow("🛑 3 consecutive losses par rokdo (OFF = scalping chalta rahe)", s.blockConsec) { v ->
+                        vm.update { it.copy(blockConsec = v) }
+                    }
+                    HorizontalDivider(color = Tokens.BorderSubtle)
+                    PlainField("Scalp TP (%)", s.scalpTpPct) { v -> vm.update { it.copy(scalpTpPct = v) } }
+                    PlainField("Scalp SL (%)", s.scalpSlPct) { v -> vm.update { it.copy(scalpSlPct = v) } }
+                    PlainField("Scalp target (USD per trade)", s.scalpTargetUsd) { v -> vm.update { it.copy(scalpTargetUsd = v) } }
                     PlainField("HFT maximum spread (bps)", s.hftMaxSpreadBps) { v -> vm.update { it.copy(hftMaxSpreadBps = v) } }
                     PlainField("HFT slippage budget (bps)", s.hftMaxSlippageBps) { v -> vm.update { it.copy(hftMaxSlippageBps = v) } }
                     PlainField("HFT round-trip fee (bps)", s.hftFeeBps) { v -> vm.update { it.copy(hftFeeBps = v) } }
                     PlainField("Cooldown seconds", s.hftCooldownSec) { v -> vm.update { it.copy(hftCooldownSec = v) } }
                     PlainField("Poll milliseconds", s.hftPollMs) { v -> vm.update { it.copy(hftPollMs = v) } }
                     Text(
-                        "For Gold CFD, HFT entry is blocked when spread exceeds the limit or expected edge cannot cover spread + slippage + fees.",
+                        "Paper trades par ye limits laagu nahi hotin — sirf LIVE entries guard se guzarti hain. " +
+                            "Kill-switch Army Chat me `kill on` / `kill off` se chalta hai.",
                         color = Tokens.TextSecondary,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
-            if (settingsTab == 5) {
+            if (settingsTab == 7) {
             SectionCard(
                 step = "⑤",
                 title = "App Color + Notifications",

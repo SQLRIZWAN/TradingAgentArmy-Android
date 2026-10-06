@@ -29,6 +29,8 @@ class BotRepository @Inject constructor(
 ) {
     fun bots(): Flow<List<Bot>> = botDao.observeAll().map { it.map(::mapBot) }
 
+    suspend fun allNow(): List<Bot> = botDao.all().map(::mapBot)
+
     suspend fun bot(id: String): Bot? = botDao.byId(id)?.let(::mapBot)
 
     suspend fun tradesOf(botName: String): List<Trade> = tradeDao.byBot(botName).map(::mapTrade)

@@ -35,6 +35,8 @@ data class SettingsUi(
     val marketType: String = "SPOT",
     val futuresProduct: String = "USDT-FUTURES",
     val futuresMargin: String = "isolated",
+    val bitgetDemo: Boolean = false,
+    val cfdSuffix: String = "",
     val geminiKey: String = "",
     val geminiModel: String = "gemini-2.5-flash",
     val openaiKey: String = "",
@@ -61,12 +63,18 @@ data class SettingsUi(
     val roundMinutes: Int = 15,
     val hftEnabled: Boolean = false,
     val liveTrading: Boolean = false,
-    val maxDailyLossUsd: String = "50",
-    val maxTradeUsd: String = "25",
+    val maxDailyLossUsd: String = "10000",
+    val maxTradeUsd: String = "1000",
+    val maxTradesDay: String = "20000",
+    val blockConsec: Boolean = false,
+    val scalpTpPct: String = "0.10",
+    val scalpSlPct: String = "0.10",
+    val scalpTargetUsd: String = "1",
+    val minuteTick: Boolean = true,
     val hftMaxSpreadBps: String = "20",
     val hftMaxSlippageBps: String = "10",
     val hftFeeBps: String = "5",
-    val hftCooldownSec: String = "30",
+    val hftCooldownSec: String = "5",
     val hftPollMs: String = "2000",
     val notifyTrades: Boolean = true,
     val notifyCrash: Boolean = true,
@@ -113,6 +121,8 @@ class SettingsViewModel @Inject constructor(
             marketType = prefs.getString("bitget_market_type", "SPOT"),
             futuresProduct = prefs.getString("bitget_product_type", "USDT-FUTURES"),
             futuresMargin = prefs.getString("bitget_margin_mode", "isolated"),
+            bitgetDemo = prefs.getBool("bitget_demo", false),
+            cfdSuffix = prefs.getString("bitget_cfd_suffix", ""),
             geminiKey = prefs.geminiKey,
             geminiModel = prefs.geminiModel,
             openaiKey = prefs.openaiKey,
@@ -135,12 +145,18 @@ class SettingsViewModel @Inject constructor(
             roundMinutes = prefs.getInt("army_round_minutes", 15),
             hftEnabled = prefs.getBool("hft_enabled", false),
             liveTrading = prefs.getBool("live_trading", false),
-            maxDailyLossUsd = prefs.getString("risk_max_daily_loss", "50"),
-            maxTradeUsd = prefs.getString("risk_max_trade", "25"),
+            maxDailyLossUsd = prefs.getString("risk_max_daily_loss", "10000"),
+            maxTradeUsd = prefs.getString("risk_max_trade", "1000"),
+            maxTradesDay = prefs.getString("risk_max_trades_day", "20000"),
+            blockConsec = prefs.getBool("risk_block_consec", false),
+            scalpTpPct = prefs.getString("scalp_tp_pct", "0.10"),
+            scalpSlPct = prefs.getString("scalp_sl_pct", "0.10"),
+            scalpTargetUsd = prefs.getString("scalp_target_usd", "1"),
+            minuteTick = prefs.getBool("agent_minute_tick", true),
             hftMaxSpreadBps = prefs.getString("hft_max_spread_bps", "20"),
             hftMaxSlippageBps = prefs.getString("hft_max_slippage_bps", "10"),
             hftFeeBps = prefs.getString("hft_fee_bps", "5"),
-            hftCooldownSec = prefs.getInt("hft_cooldown_sec", 30).toString(),
+            hftCooldownSec = prefs.getInt("hft_cooldown_sec", 5).toString(),
             hftPollMs = prefs.getInt("hft_poll_ms", 2000).toString(),
             notifyTrades = prefs.notifyTrades,
             notifyCrash = prefs.notifyCrash,
@@ -268,6 +284,8 @@ class SettingsViewModel @Inject constructor(
         prefs.putString("bitget_market_type", s.marketType)
         prefs.putString("bitget_product_type", s.futuresProduct.trim().ifBlank { "USDT-FUTURES" })
         prefs.putString("bitget_margin_mode", s.futuresMargin.trim().ifBlank { "isolated" })
+        prefs.putBool("bitget_demo", s.bitgetDemo)
+        prefs.putString("bitget_cfd_suffix", s.cfdSuffix.trim())
         prefs.geminiKey = s.geminiKey.trim()
         prefs.geminiModel = s.geminiModel.trim()
         prefs.openaiKey = s.openaiKey.trim()
@@ -290,12 +308,18 @@ class SettingsViewModel @Inject constructor(
         prefs.putInt("army_round_minutes", s.roundMinutes)
         prefs.putBool("hft_enabled", s.hftEnabled)
         prefs.putBool("live_trading", s.liveTrading)
-        prefs.putString("risk_max_daily_loss", s.maxDailyLossUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "50")
-        prefs.putString("risk_max_trade", s.maxTradeUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "25")
+        prefs.putString("risk_max_daily_loss", s.maxDailyLossUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "10000")
+        prefs.putString("risk_max_trade", s.maxTradeUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "1000")
+        prefs.putString("risk_max_trades_day", s.maxTradesDay.toIntOrNull()?.coerceAtLeast(1)?.toString() ?: "20000")
+        prefs.putBool("risk_block_consec", s.blockConsec)
+        prefs.putString("scalp_tp_pct", s.scalpTpPct.toDoubleOrNull()?.coerceIn(0.001, 50.0)?.toString() ?: "0.10")
+        prefs.putString("scalp_sl_pct", s.scalpSlPct.toDoubleOrNull()?.coerceIn(0.001, 50.0)?.toString() ?: "0.10")
+        prefs.putString("scalp_target_usd", s.scalpTargetUsd.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "1")
+        prefs.putBool("agent_minute_tick", s.minuteTick)
         prefs.putString("hft_max_spread_bps", s.hftMaxSpreadBps.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "20")
         prefs.putString("hft_max_slippage_bps", s.hftMaxSlippageBps.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "10")
         prefs.putString("hft_fee_bps", s.hftFeeBps.toDoubleOrNull()?.coerceAtLeast(0.0)?.toString() ?: "5")
-        prefs.putInt("hft_cooldown_sec", s.hftCooldownSec.toIntOrNull()?.coerceIn(1, 3600) ?: 30)
+        prefs.putInt("hft_cooldown_sec", s.hftCooldownSec.toIntOrNull()?.coerceIn(1, 3600) ?: 5)
         prefs.putInt("hft_poll_ms", s.hftPollMs.toIntOrNull()?.coerceIn(250, 10_000) ?: 2000)
         prefs.notifyTrades = s.notifyTrades
         prefs.notifyCrash = s.notifyCrash
@@ -379,6 +403,30 @@ class SettingsViewModel @Inject constructor(
     fun testBitget() = test("bitget") {
         val r = bitgetClient.testConnection()
         if (r.ok) r.message else throw IllegalStateException(r.message)
+    }
+
+    fun testCfd() = test("cfd") {
+        save(silent = true)
+        val r = bitgetClient.testCfdAccount()
+        if (r.ok) {
+            val suffix = runCatching { bitgetClient.autoDetectCfdSuffix() }.getOrDefault("")
+            if (suffix.isNotBlank()) _state.value = _state.value.copy(cfdSuffix = suffix)
+            r.message + if (suffix.isNotBlank()) " · symbol suffix '$suffix'" else ""
+        } else throw IllegalStateException(r.message)
+    }
+
+    fun detectCfdSuffix() = test("cfd_suffix") {
+        save(silent = true)
+        val suffix = bitgetClient.autoDetectCfdSuffix()
+        if (suffix.isBlank()) throw IllegalStateException("Instrument list empty — CFD keys/account check karein")
+        _state.value = _state.value.copy(cfdSuffix = suffix)
+        "Detected suffix '$suffix' (XAUUSD$suffix)"
+    }
+
+    fun setBitgetDemo(on: Boolean) {
+        _state.value = _state.value.copy(bitgetDemo = on)
+        save(silent = true)
+        _tests.value = _tests.value + ("bitget" to (if (on) "ℹ️ DEMO ON — paptrading:1 header active" else "ℹ️ DEMO OFF — real account"))
     }
 
     fun testMt5() = test("mt5") {

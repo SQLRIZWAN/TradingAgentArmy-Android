@@ -43,6 +43,14 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
     val configured: Boolean
         get() = prefs.bitgetKey.isNotBlank() && prefs.bitgetSecret.isNotBlank() && prefs.bitgetPassphrase.isNotBlank()
 
+    /**
+     * Bitget DEMO (paper) trading. API keys must be created while the Bitget
+     * account is in Demo mode; every request then carries the `paptrading: 1`
+     * header so orders are filled against the simulated CFD/spot account.
+     */
+    val demoMode: Boolean
+        get() = prefs.getBool("bitget_demo", false)
+
     private fun sign(ts: String, method: String, path: String, body: String): String {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(prefs.bitgetSecret.toByteArray(), "HmacSHA256"))
@@ -57,6 +65,7 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
             .addHeader("ACCESS-TIMESTAMP", ts)
             .addHeader("ACCESS-PASSPHRASE", prefs.bitgetPassphrase)
             .addHeader("Content-Type", "application/json")
+            .apply { if (demoMode) addHeader("paptrading", "1") }
             .apply { if (method == "POST") post(body.toRequestBody("application/json".toMediaType())) else get() }
             .build()
         http.newCall(req).execute().use { it.code to (it.body?.string().orEmpty()) }
@@ -84,7 +93,74 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         if (!configured) return BitgetResult(false, "Bitget API key/secret/passphrase missing")
         val (code, body) = call("GET", "/api/v2/spot/account/info")
         val r = parse(body)
-        return if (r.ok) r else BitgetResult(false, "HTTP $code · ${r.message}")
+        return if (r.ok) BitgetResult(true, if (demoMode) "OK (DEMO · paptrading:1)" else "OK")
+        else BitgetResult(false, "HTTP $code · ${r.message}")
+    }
+
+    /**
+     * Real CFD / MT5-equivalent account check: Bitget CFD fund detail.
+     * Confirms the key has CFD permission AND that a CFD account exists
+     * (open it on bitget.com first — the API cannot create one).
+     */
+    suspend fun testCfdAccount(): BitgetResult {
+        if (!configured) return BitgetResult(false, "Bitget API keys missing")
+        val (code, body) = call("GET", "/api/v3/cfd/account/fund-detail")
+        val r = parse(body)
+        if (!r.ok) {
+            val hint = when {
+                code == 401 || body.contains("40101", true) || body.contains("40102", true) ->
+                    "auth failed — demo keys banate waqt Demo mode ON rakhein"
+                body.contains("not", true) && body.contains("found", true) ->
+                    "CFD account nahi mila — bitget.com par MT5/CFD account khol lein"
+                else -> r.message
+            }
+            return BitgetResult(false, "HTTP $code · $hint")
+        }
+        val equity = runCatching {
+            val o = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
+            o?.get("equity")?.jsonPrimitive?.content
+                ?: o?.get("accountEquity")?.jsonPrimitive?.content
+        }.getOrNull() ?: ""
+        return BitgetResult(
+            true,
+            buildString {
+                append(if (demoMode) "DEMO CFD OK" else "CFD OK")
+                if (equity.isNotBlank()) append(" · equity $equity")
+            }
+        )
+    }
+
+    /** Available CFD symbols incl. account-mode suffix (.s / .pro / none). */
+    suspend fun cfdInstruments(): List<String> = runCatching {
+        val (code, body) = call("GET", "/api/v3/cfd/account/instruments")
+        if (code !in 200..299 || !parse(body).ok) return emptyList()
+        val data = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
+        data.mapNotNull { it.jsonObject["symbol"]?.jsonPrimitive?.content }
+    }.getOrElse { emptyList() }
+
+    /**
+     * Resolves the exchange's exact CFD symbol for a bare name like XAUUSD
+     * by looking at the instrument list (auto suffix detection).
+     */
+    suspend fun resolveCfdSymbol(bare: String): String {
+        val target = bare.uppercase().replace("/", "")
+        val list = runCatching { cfdInstruments() }.getOrDefault(emptyList())
+        list.firstOrNull { it.uppercase() == target }?.let { return it }
+        val suffix = prefs.getString("bitget_cfd_suffix", "")
+        if (suffix.isNotBlank()) {
+            list.firstOrNull { it.uppercase() == target + suffix.uppercase() }?.let { return it }
+        }
+        return list.firstOrNull { it.uppercase().startsWith(target) } ?: target
+    }
+
+    /** Detects and stores the account-mode suffix ("" / ".s" / ".pro") from XAUUSD. */
+    suspend fun autoDetectCfdSuffix(): String {
+        val list = runCatching { cfdInstruments() }.getOrDefault(emptyList())
+        if (list.isEmpty()) return ""
+        val xau = list.firstOrNull { it.uppercase().startsWith("XAUUSD") } ?: return ""
+        val suffix = xau.uppercase().removePrefix("XAUUSD")
+        prefs.putString("bitget_cfd_suffix", suffix)
+        return suffix
     }
 
     suspend fun spotPrice(symbol: String): String {

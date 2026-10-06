@@ -1,6 +1,5 @@
 package com.rizwan.tradingagentarmy.ui.dashboard
 
-import android.annotation.SuppressLint
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -23,13 +22,20 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,118 +44,74 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
+import com.rizwan.tradingagentarmy.domain.model.Trade
 import com.rizwan.tradingagentarmy.ui.theme.AppFonts
 import com.rizwan.tradingagentarmy.ui.theme.Tokens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import org.json.JSONArray
-import org.json.JSONObject
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 
 @Composable
-fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
-    val tickers by viewModel.tickers.collectAsState()
+fun DashboardScreen(
+    onOpenSettings: () -> Unit,
+    viewModel: DashboardViewModel = hiltViewModel()
+) {
     val portfolio by viewModel.portfolio.collectAsState()
     val trades by viewModel.trades.collectAsState()
+    val openTrades by viewModel.openTrades.collectAsState()
     val circuit by viewModel.circuit.collectAsState()
     val backendAlive by viewModel.backendAlive.collectAsState()
-    val wsConnected by viewModel.wsConnected.collectAsState()
     val noBackend by viewModel.noBackend.collectAsState()
+    val wsConnected by viewModel.wsConnected.collectAsState()
     val lastSync by viewModel.lastSync.collectAsState()
-    val selected by viewModel.selected.collectAsState()
-    val chartError by viewModel.chartError.collectAsState()
-    val candles by viewModel.candles.collectAsState()
-    val chartLoading by viewModel.chartLoading.collectAsState()
-    val timeframe by viewModel.timeframe.collectAsState()
     val liveTrading by viewModel.liveTrading.collectAsState()
-    val openTrades = trades.filter { it.status.equals("OPEN", true) || it.status.equals("PAPER_OPEN", true) || it.exit == null }
+    val serviceOn by viewModel.serviceOn.collectAsState()
+    val agentsOn by viewModel.agentsOn.collectAsState()
+    val agentCards by viewModel.agentCards.collectAsState()
+    val apiLines by viewModel.apiLines.collectAsState()
+    val tradesToday by viewModel.tradesToday.collectAsState()
+    val totalTrades by viewModel.totalTrades.collectAsState()
+    val armyStatus by viewModel.armyStatus.collectAsState()
+    val tickers by viewModel.tickers.collectAsState()
+
+    var confirmArmy by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // ---------------- header ----------------
         item {
-            Column(
-                Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Trading command center",
-                    color = Tokens.TextPrimary,
-                    style = MaterialTheme.typography.headlineSmall
-                )
-                Text(
-                    "AI Army · markets · positions · risk",
-                    color = Tokens.TextSecondary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-        item {
-            Surface(
-                color = if (liveTrading) Tokens.AccentDanger.copy(alpha = 0.10f) else Tokens.AccentPrimary.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-            ) {
-                Row(
-                    Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    StatusDot(liveTrading, if (liveTrading) "LIVE TRADING" else "PAPER MODE")
+                Column(Modifier.weight(1f)) {
+                    Text("Dashboard", color = Tokens.TextPrimary, style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        if (liveTrading) "Real orders enabled — verify exchange keys and SL/TP"
-                        else "Safe virtual mode — no real money is used",
-                        color = Tokens.TextSecondary,
+                        if (serviceOn) "⚔️ Army 24/7 chal rahi hai" else "Army band hai — neeche 24/7 ON karein",
+                        color = if (serviceOn) Tokens.AccentPrimary else Tokens.TextSecondary,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-            }
-        }
-        // ---- status row ----
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                StatusDot(
-                    backendAlive || noBackend,
-                    when {
-                        backendAlive -> "Backend"
-                        noBackend -> "Cloud AI"
-                        wsConnected -> "WS"
-                        else -> "Offline"
-                    }
-                )
-                StatusDot(wsConnected || !backendAlive, if (wsConnected) "Live feed" else "Polling")
-                Text(
-                    text = "Sync " + if (lastSync == 0L) "—" else SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(lastSync)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Tokens.TextSecondary,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Filled.Settings, "Settings", tint = Tokens.TextSecondary)
+                }
             }
         }
 
-        // ---- circuit breaker ----
+        // ---------------- circuit breaker ----------------
         if (circuit?.active == true) {
             item {
                 val c = circuit!!
@@ -168,7 +130,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                     Column(Modifier.padding(12.dp)) {
                         Text("🚨 CIRCUIT BREAKER ACTIVE", color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "Daily loss limit reached. All bots halted. Resets in ${c.resetIn}.",
+                            "Daily loss limit reached. Resets in ${c.resetIn}.",
                             color = Tokens.TextPrimary,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -177,9 +139,187 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
             }
         }
 
-        // ---- portfolio card ----
+        // ---------------- PnL hero ----------------
         item {
             val p = portfolio
+            Surface(
+                color = Tokens.Surface,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Today P&L", style = MaterialTheme.typography.labelMedium, color = Tokens.TextSecondary)
+                            val today = p?.todayPnl ?: 0.0
+                            Text(
+                                text = (if (today >= 0) "+$" else "-$") + "%.2f".format(kotlin.math.abs(today)),
+                                style = MaterialTheme.typography.headlineMedium.copy(fontFamily = AppFonts.Mono),
+                                color = if (today >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("All-time P&L", style = MaterialTheme.typography.labelMedium, color = Tokens.TextSecondary)
+                            val total = p?.totalPnl ?: 0.0
+                            Text(
+                                text = (if (total >= 0) "+$" else "-$") + "%.2f".format(kotlin.math.abs(total)),
+                                style = MaterialTheme.typography.titleLarge.copy(fontFamily = AppFonts.Mono),
+                                color = if (total >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
+                            )
+                        }
+                    }
+                    HorizontalStats(
+                        listOf(
+                            "Trades today" to "$tradesToday",
+                            "Open" to "${openTrades.size}",
+                            "All trades" to "$totalTrades",
+                            "Bots" to "${(p?.activeRunning ?: 0) + (p?.activeDemo ?: 0)}"
+                        )
+                    )
+                }
+            }
+        }
+
+        // ---------------- 24/7 master button ----------------
+        item {
+            Surface(
+                color = if (serviceOn) Tokens.AccentPrimary.copy(alpha = 0.12f) else Tokens.Surface,
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (serviceOn) Tokens.AccentPrimary else Tokens.BorderSubtle
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "24/7 Autonomous Army",
+                                color = Tokens.TextPrimary,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                if (serviceOn) "Foreground service ON · har minute ek agent kaam kar raha hai"
+                                else "Service OFF · agents idle hain",
+                                color = if (serviceOn) Tokens.AccentPrimary else Tokens.TextSecondary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = serviceOn && agentsOn,
+                            onCheckedChange = { want ->
+                                if (want) viewModel.toggleArmy(true) else confirmArmy = true
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = Tokens.AccentPrimary,
+                                checkedThumbColor = Tokens.Surface,
+                                uncheckedTrackColor = Tokens.SurfaceElevated
+                            )
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            color = if (serviceOn) Tokens.AccentDanger.copy(alpha = 0.15f) else Tokens.AccentPrimary,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    if (serviceOn) confirmArmy = true else viewModel.toggleArmy(true)
+                                }
+                        ) {
+                            Row(
+                                Modifier.padding(vertical = 11.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    if (serviceOn) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = if (serviceOn) Tokens.AccentDanger else Tokens.BackgroundBase,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer8()
+                                Text(
+                                    if (serviceOn) "STOP 24/7" else "START 24/7",
+                                    color = if (serviceOn) Tokens.AccentDanger else Tokens.BackgroundBase,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Surface(
+                            color = Tokens.SurfaceElevated,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { viewModel.runRoundNow() }
+                        ) {
+                            Row(
+                                Modifier.padding(vertical = 11.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Filled.Bolt,
+                                    contentDescription = null,
+                                    tint = Tokens.AccentPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer8()
+                                Text(
+                                    "RUN ROUND",
+                                    color = Tokens.TextPrimary,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        armyStatus,
+                        color = Tokens.TextSecondary,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2
+                    )
+                }
+            }
+        }
+
+        // ---------------- agent status ----------------
+        item {
+            val liveCount = agentCards.count { it.live }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("AI Agents", color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                Spacer8()
+                Text(
+                    "$liveCount/${agentCards.size} active",
+                    color = if (liveCount > 0) Tokens.AccentPrimary else Tokens.TextSecondary,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
+        item {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(agentCards, key = { it.role.id }) { card -> AgentChip(card) }
+            }
+        }
+
+        // ---------------- API status ----------------
+        item {
             Surface(
                 color = Tokens.Surface,
                 shape = RoundedCornerShape(12.dp),
@@ -187,144 +327,46 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp)
             ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("Today P&L", style = MaterialTheme.typography.labelMedium, color = Tokens.TextSecondary)
-                            val today = p?.todayPnl ?: 0.0
-                            Text(
-                                text = (if (today >= 0) "+" else "") + "%.2f".format(today),
-                                style = MaterialTheme.typography.headlineSmall.copy(fontFamily = AppFonts.Mono),
-                                color = if (today >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Total P&L", style = MaterialTheme.typography.labelMedium, color = Tokens.TextSecondary)
-                            val total = p?.totalPnl ?: 0.0
-                            Text(
-                                text = (if (total >= 0) "+" else "") + "%.2f".format(total),
-                                style = MaterialTheme.typography.titleMedium.copy(fontFamily = AppFonts.Mono),
-                                color = if (total >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
-                            )
-                        }
-                    }
-                    Text(
-                        text = buildString {
-                            append("${p?.activeRunning ?: 0} Running")
-                            append(" | ${p?.activeDemo ?: 0} Demo")
-                            append(" | ${p?.stopped ?: 0} Stopped")
-                            append(if (p?.fromBackend == true) " · backend" else " · local")
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Tokens.TextSecondary
-                    )
-                }
-            }
-        }
-
-        // ---- watchlist ----
-        item {
-            LazyRow(
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(tickers, key = { it.symbol }) { t ->
-                    TickerCard(t) { viewModel.selectSymbol(t.symbol) }
-                }
-                if (tickers.isEmpty()) {
-                    item {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("System status", color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                        Spacer8()
                         Text(
-                            "Loading market…",
+                            "sync " + if (lastSync == 0L) "—"
+                            else SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(lastSync)),
                             color = Tokens.TextSecondary,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(8.dp)
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    apiLines.forEach { line -> ApiRow(line) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatusDot(
+                            backendAlive || noBackend,
+                            if (backendAlive) "Backend" else if (noBackend) "On-device" else "No backend"
+                        )
+                        StatusDot(wsConnected, if (wsConnected) "Live feed" else "Polling")
+                        StatusDot(
+                            !liveTrading,
+                            if (liveTrading) "🔴 LIVE money" else "🟢 PAPER mode"
                         )
                     }
                 }
             }
         }
 
-        // ---- chart ----
-        item {
-            Surface(
-                color = Tokens.Surface,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-            ) {
-                Column {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        var menu by remember { mutableStateOf(false) }
-                        TextButton(onClick = { menu = true }) {
-                            Text(selected, color = Tokens.TextPrimary, style = MaterialTheme.typography.titleSmall)
-                        }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            listOf("BTC/USDT", "ETH/USDT", "SOL/USDT", "XAUUSD", "EURUSD", "GBPUSD").forEach { s ->
-                                DropdownMenuItem(text = { Text(s) }, onClick = {
-                                    viewModel.selectSymbol(s)
-                                    menu = false
-                                })
-                            }
-                        }
-                        Text("Bitget / market feed", style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
-                    }
-                    LazyRow(
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(listOf("1m", "5m", "15m", "1h", "1D")) { frame ->
-                            TextButton(onClick = { viewModel.setTimeframe(frame) }) {
-                                Text(
-                                    frame,
-                                    color = if (timeframe == frame) Tokens.AccentPrimary else Tokens.TextSecondary,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        }
-                    }
-                    Box(Modifier.height(240.dp)) {
-                        when {
-                            chartLoading && candles.isEmpty() -> Box(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    color = Tokens.AccentPrimary,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                            chartError && candles.isEmpty() -> Box(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        "Chart load nahi hua — network check karein",
-                                        color = Tokens.TextSecondary,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                    TextButton(onClick = { viewModel.loadCandles() }) {
-                                        Text("⟳ Retry", color = Tokens.AccentPrimary)
-                                    }
-                                }
-                            }
-                            else -> LightweightChart(candles, Modifier.fillMaxSize())
-                        }
-                    }
+        // ---------------- market strip ----------------
+        if (tickers.isNotEmpty()) {
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(tickers, key = { it.symbol }) { t -> TickerCard(t) }
                 }
             }
         }
 
+        // ---------------- open positions ----------------
         item {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
@@ -342,17 +384,19 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
         if (openTrades.isEmpty()) {
             item {
                 Text(
-                    "No open position — Army ke live/paper trades yahan dikhenge.",
+                    "Koi open position nahi — Army/HFT ki trades yahan dikhengi.",
                     color = Tokens.TextSecondary,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
         } else {
-            items(openTrades, key = { "open-${it.id}" }) { t -> OpenPositionCard(t) { viewModel.closePosition(t.id) } }
+            items(openTrades, key = { "open-${it.id}" }) { t ->
+                OpenPositionCard(t) { viewModel.closePosition(t.id) }
+            }
         }
 
-        // ---- recent trades ----
+        // ---------------- recent trades ----------------
         item {
             Text(
                 "Recent Trades",
@@ -361,36 +405,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
-        items(trades, key = { it.id }) { t ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(t.symbol, style = MaterialTheme.typography.bodySmall, color = Tokens.TextPrimary)
-                Text(
-                    t.side,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono),
-                    color = if (t.side.equals("BUY", true)) Tokens.AccentPrimary else Tokens.AccentDanger
-                )
-                Text(
-                    "%.2f → %s".format(t.entry, t.exit?.let { "%.2f".format(it) } ?: "—"),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono),
-                    color = Tokens.TextSecondary
-                )
-                Text(
-                    (if (t.pnl >= 0) "+" else "") + "%.2f".format(t.pnl),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono),
-                    color = if (t.pnl >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
-                )
-                Text(
-                    SimpleDateFormat("HH:mm", Locale.US).format(Date(t.timestamp)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Tokens.TextSecondary
-                )
-            }
-        }
+        items(trades, key = { it.id }) { t -> TradeRow(t) }
         if (trades.isEmpty()) {
             item {
                 Text(
@@ -401,48 +416,182 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                 )
             }
         }
-        item { Box(Modifier.height(8.dp)) }
+        item { Box(Modifier.height(10.dp)) }
+    }
+
+    if (confirmArmy) {
+        AlertDialog(
+            onDismissRequest = { confirmArmy = false },
+            containerColor = Tokens.Surface,
+            title = { Text("24/7 Army band karein?", color = Tokens.TextPrimary) },
+            text = {
+                Text(
+                    "Foreground service stop hoga — agents, scalper aur auto rounds ruk jayenge. " +
+                        "Chalte hue positions exchange par safe rehti hain.",
+                    color = Tokens.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmArmy = false
+                    viewModel.toggleArmy(false)
+                }) { Text("Stop army", color = Tokens.AccentDanger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmArmy = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
 @Composable
-private fun LightweightChart(candles: List<Candle>, modifier: Modifier = Modifier) {
-    val payload = remember(candles) {
-        JSONArray().apply {
-            candles.forEach { c ->
-                put(JSONObject().apply {
-                    put("ts", c.ts)
-                    put("o", c.o)
-                    put("h", c.h)
-                    put("l", c.l)
-                    put("c", c.c)
-                    put("v", c.volume)
-                })
-            }
-        }.toString()
-    }
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            WebView(context).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
-                webViewClient = WebViewClient()
-                setBackgroundColor(android.graphics.Color.rgb(16, 23, 34))
-                loadUrl("file:///android_asset/trading_chart.html")
-            }
-        },
-        update = { webView ->
-            webView.post {
-                runCatching { webView.evaluateJavascript("setBars($payload);", null) }
+private fun Spacer8() = androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+
+@Composable
+private fun HorizontalStats(items: List<Pair<String, String>>) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        items.forEach { (label, value) ->
+            Column {
+                Text(label, color = Tokens.TextSecondary, style = MaterialTheme.typography.labelSmall)
+                Text(
+                    value,
+                    color = Tokens.TextPrimary,
+                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = AppFonts.Mono)
+                )
             }
         }
-    )
+    }
 }
 
 @Composable
-private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Trade, onClose: () -> Unit) {
+private fun ApiRow(line: ApiLine) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(
+                    when (line.state) {
+                        0 -> Tokens.AccentPrimary
+                        1 -> Tokens.AccentWarning
+                        else -> Tokens.AccentDanger
+                    }
+                )
+        )
+        Spacer8()
+        Text(line.label, color = Tokens.TextSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(74.dp))
+        Text(
+            line.detail,
+            color = Tokens.TextPrimary,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun AgentChip(card: AgentCard) {
+    val active = card.live
+    Surface(
+        color = if (active) Tokens.AccentPrimary.copy(alpha = 0.10f) else Tokens.Surface,
+        shape = RoundedCornerShape(9.dp)
+    ) {
+        Column(
+            Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(card.role.emoji, fontSize = 14.sp)
+            Text(
+                card.role.displayName.take(9),
+                color = if (active) Tokens.TextPrimary else Tokens.TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (active) Tokens.AccentPrimary else Tokens.BorderSubtle)
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.width(4.dp))
+                Text(
+                    if (card.runs > 0) "${card.runs} run" else "ready",
+                    color = if (active) Tokens.AccentPrimary else Tokens.TextTertiary,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusDot(ok: Boolean, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(if (ok) Tokens.AccentPrimary else Tokens.AccentWarning)
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
+    }
+}
+
+@Composable
+private fun TickerCard(t: MarketTicker) {
+    Surface(color = Tokens.Surface, shape = RoundedCornerShape(10.dp), modifier = Modifier.width(132.dp)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(t.symbol, style = MaterialTheme.typography.labelMedium, color = Tokens.TextSecondary)
+            Text(
+                "%,.${t.decimals}f".format(t.price),
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = AppFonts.Mono),
+                color = Tokens.TextPrimary
+            )
+            Text(
+                text = (if (t.change24h >= 0) "▲ +" else "▼ ") + "%.2f%%".format(t.change24h),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = AppFonts.Mono),
+                color = if (t.change24h >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
+            )
+        }
+    }
+}
+
+@Composable
+private fun TradeRow(t: Trade) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(t.symbol, style = MaterialTheme.typography.bodySmall, color = Tokens.TextPrimary)
+        Text(
+            t.side,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono),
+            color = if (t.side.equals("BUY", true)) Tokens.AccentPrimary else Tokens.AccentDanger
+        )
+        Text(
+            "%.2f → %s".format(t.entry, t.exit?.let { "%.2f".format(it) } ?: "—"),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono),
+            color = Tokens.TextSecondary
+        )
+        Text(
+            (if (t.pnl >= 0) "+" else "") + "%.2f".format(t.pnl),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono),
+            color = if (t.pnl >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
+        )
+        Text(
+            SimpleDateFormat("HH:mm", Locale.US).format(Date(t.timestamp)),
+            style = MaterialTheme.typography.labelSmall,
+            color = Tokens.TextSecondary
+        )
+    }
+}
+
+@Composable
+private fun OpenPositionCard(trade: Trade, onClose: () -> Unit) {
     val displayPnl = if (trade.unrealizedPnl != 0.0) trade.unrealizedPnl else trade.pnl
     val positive = displayPnl >= 0
     var confirmClose by remember { mutableStateOf(false) }
@@ -483,7 +632,7 @@ private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Tra
             }
             Text(
                 if (trade.stopLoss != null && trade.takeProfit != null) "Exchange protection: SL + TP configured"
-                else "Protection pending — do not use LIVE until SL/TP is visible",
+                else "Protection pending — LIVE se pehle SL/TP check karein",
                 color = if (trade.stopLoss != null && trade.takeProfit != null) Tokens.AccentPrimary else Tokens.AccentWarning,
                 style = MaterialTheme.typography.labelSmall
             )
@@ -493,7 +642,7 @@ private fun OpenPositionCard(trade: com.rizwan.tradingagentarmy.domain.model.Tra
         AlertDialog(
             onDismissRequest = { confirmClose = false },
             title = { Text("Close ${trade.symbol} position?") },
-            text = { Text("A market exit will be sent for this specific position. Check the exchange before confirming.") },
+            text = { Text("Exchange par market exit jayega. Confirm karne se pehle exchange check karein.") },
             confirmButton = {
                 TextButton(onClick = { confirmClose = false; onClose() }) {
                     Text("Confirm close", color = Tokens.AccentDanger)
@@ -510,148 +659,4 @@ private fun MiniValue(label: String, value: String, color: androidx.compose.ui.g
         Text(label, color = Tokens.TextSecondary, style = MaterialTheme.typography.labelSmall)
         Text(value, color = color, style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono))
     }
-}
-
-@Composable
-private fun StatusDot(ok: Boolean, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(if (ok) Tokens.AccentPrimary else Tokens.AccentDanger)
-        )
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Tokens.TextSecondary)
-    }
-}
-
-@Composable
-private fun TickerCard(t: MarketTicker, onClick: () -> Unit) {
-    Surface(
-        color = Tokens.Surface,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.width(140.dp)
-    ) {
-        Column(
-            Modifier
-                .padding(10.dp)
-                .clip(RoundedCornerShape(10.dp)),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                t.symbol,
-                style = MaterialTheme.typography.labelMedium,
-                color = Tokens.TextSecondary,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    
-                    .clickable(onClick = onClick)
-            )
-            Text(
-                text = formatPrice(t.price, t.decimals),
-                style = MaterialTheme.typography.titleMedium.copy(fontFamily = AppFonts.Mono),
-                color = Tokens.TextPrimary
-            )
-            Text(
-                text = (if (t.change24h >= 0) "▲ +" else "▼ ") + "%.2f%%".format(t.change24h),
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = AppFonts.Mono),
-                color = if (t.change24h >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
-            )
-        }
-    }
-}
-
-private fun formatPrice(p: Double, decimals: Int) = "%,.${decimals}f".format(p)
-
-@Composable
-private fun CandleChart(candles: List<Candle>, modifier: Modifier = Modifier) {
-    if (candles.isEmpty()) return
-    val gridColor = Tokens.BorderSubtle
-    val upColor = Tokens.AccentPrimary
-    val downColor = Tokens.AccentDanger
-    val labelColor = Tokens.TextSecondary
-    val lastColor = Tokens.TextPrimary
-    Canvas(modifier) {
-        val chartW = size.width - 56.dp.toPx()
-        val chartH = size.height
-        var lo = candles.minOf { it.l }
-        var hi = candles.maxOf { it.h }
-        if (hi - lo < 0.0001f) { hi += 1f; lo -= 1f }
-        val pad = (hi - lo) * 0.06f
-        lo -= pad; hi += pad
-        fun y(p: Float) = chartH - ((p - lo) / (hi - lo)) * chartH
-
-        val textPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.argb(
-                (labelColor.alpha * 255).toInt(),
-                (labelColor.red * 255).toInt(),
-                (labelColor.green * 255).toInt(),
-                (labelColor.blue * 255).toInt()
-            )
-            textSize = 10.dp.toPx()
-            isAntiAlias = true
-        }
-        val lastPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.argb(
-                (lastColor.alpha * 255).toInt(),
-                (lastColor.red * 255).toInt(),
-                (lastColor.green * 255).toInt(),
-                (lastColor.blue * 255).toInt()
-            )
-            textSize = 10.dp.toPx()
-            isAntiAlias = true
-            isFakeBoldText = true
-        }
-
-        // horizontal grid + right-side price labels
-        for (i in 0..4) {
-            val price = lo + (hi - lo) * i / 4f
-            val yy = y(price)
-            drawLine(gridColor, Offset(0f, yy), Offset(chartW, yy), strokeWidth = 1f)
-            drawContext.canvas.nativeCanvas.drawText(
-                fmtPrice(price), chartW + 6.dp.toPx(), yy + 3.dp.toPx(), textPaint
-            )
-        }
-
-        val slot = chartW / candles.size
-        val bodyW = (slot * 0.62f).coerceAtLeast(1.5f)
-        candles.forEachIndexed { i, c ->
-            val x = i * slot + slot / 2
-            val color = if (c.c >= c.o) upColor else downColor
-            drawLine(
-                color = color,
-                start = Offset(x, y(c.h)),
-                end = Offset(x, y(c.l)),
-                strokeWidth = 1.2f
-            )
-            val top = y(maxOf(c.o, c.c))
-            val bot = y(minOf(c.o, c.c))
-            drawRect(
-                color = color,
-                topLeft = Offset(x - bodyW / 2, top),
-                size = Size(bodyW, maxOf(bot - top, 1.5f))
-            )
-        }
-
-        // last price marker
-        val lastY = y(candles.last().c)
-        drawLine(
-            color = upColor.copy(alpha = 0.7f),
-            start = Offset(0f, lastY),
-            end = Offset(chartW, lastY),
-            strokeWidth = 1f
-        )
-        drawContext.canvas.nativeCanvas.drawText(
-            fmtPrice(candles.last().c),
-            chartW + 6.dp.toPx(),
-            lastY - 4.dp.toPx(),
-            lastPaint
-        )
-    }
-}
-
-private fun fmtPrice(p: Float): String = when {
-    p >= 1000f -> "%,.0f".format(p)
-    p >= 10f -> "%.2f".format(p)
-    else -> "%.4f".format(p)
 }

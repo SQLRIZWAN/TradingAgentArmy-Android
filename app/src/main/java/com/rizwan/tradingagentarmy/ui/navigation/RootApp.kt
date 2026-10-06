@@ -2,11 +2,10 @@ package com.rizwan.tradingagentarmy.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.CandlestickChart
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -19,26 +18,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.rizwan.tradingagentarmy.ui.army.WarRoomScreen
+import androidx.navigation.navArgument
+import com.rizwan.tradingagentarmy.ui.army.ArmyChatScreen
 import com.rizwan.tradingagentarmy.ui.bots.BotDetailScreen
-import com.rizwan.tradingagentarmy.ui.bots.BotsScreen
 import com.rizwan.tradingagentarmy.ui.chat.ChatScreen
 import com.rizwan.tradingagentarmy.ui.dashboard.DashboardScreen
+import com.rizwan.tradingagentarmy.ui.fleet.FleetScreen
+import com.rizwan.tradingagentarmy.ui.market.ChartScreen
+import com.rizwan.tradingagentarmy.ui.market.MarketScreen
 import com.rizwan.tradingagentarmy.ui.settings.SettingsScreen
 import com.rizwan.tradingagentarmy.ui.theme.Tokens
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    Tab("chat", "Chat", Icons.Filled.Forum),
-    Tab("dashboard", "Markets", Icons.Filled.Dashboard),
-    Tab("bots", "Bots", Icons.Filled.SmartToy),
-    Tab("army", "Army", Icons.Filled.Groups),
-    Tab("settings", "Settings", Icons.Filled.Tune)
+    Tab("dashboard", "Dashboard", Icons.Filled.Home),
+    Tab("market", "Market", Icons.Filled.CandlestickChart),
+    Tab("army", "Army Chat", Icons.Filled.Forum),
+    Tab("fleet", "Bots", Icons.Filled.SmartToy)
 )
 
 @Composable
@@ -47,14 +49,17 @@ fun RootApp() {
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route
 
+    val showBar = current == null || tabs.any { it.route == current } ||
+        current?.startsWith("bot_detail") == true || current?.startsWith("chat") == true
+
     Scaffold(
         containerColor = Tokens.BackgroundBase,
         bottomBar = {
-            if (tabs.any { it.route == current } || current?.startsWith("bot_detail") == true) {
+            if (showBar) {
                 NavigationBar(containerColor = Tokens.Surface) {
                     tabs.forEach { tab ->
-                        val selected = if (current?.startsWith("bot_detail") == true)
-                            tab.route == "bots" else current == tab.route
+                        val selected = if (current?.startsWith("bot_detail") == true || current == "chat")
+                            tab.route == "fleet" else current == tab.route
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
@@ -84,13 +89,26 @@ fun RootApp() {
             startDestination = "dashboard",
             modifier = Modifier.padding(padding)
         ) {
-            composable("chat") { ChatScreen() }
-            composable("dashboard") { DashboardScreen() }
-            composable("bots") {
-                BotsScreen(onOpen = { id -> nav.navigate("bot_detail/$id") })
+            composable("dashboard") {
+                DashboardScreen(onOpenSettings = { nav.navigate("settings") })
             }
+            composable("market") {
+                MarketScreen(onOpenChart = { symbol -> nav.navigate("chart/${java.net.URLEncoder.encode(symbol, "UTF-8")}") })
+            }
+            composable("army") { ArmyChatScreen() }
+            composable("fleet") {
+                FleetScreen(onOpenBot = { id -> nav.navigate("bot_detail/$id") })
+            }
+            composable("chat") { ChatScreen() }
             composable("settings") { SettingsScreen() }
-            composable("army") { WarRoomScreen() }
+            composable(
+                "chart/{symbol}",
+                arguments = listOf(navArgument("symbol") { type = NavType.StringType })
+            ) { entry ->
+                val raw = entry.arguments?.getString("symbol") ?: "BTCUSDT"
+                val symbol = java.net.URLDecoder.decode(raw, "UTF-8")
+                ChartScreen(symbol = symbol, timeframe = "5m", onBack = { nav.popBackStack() })
+            }
             composable("bot_detail/{botId}") { entry ->
                 val id = entry.arguments?.getString("botId") ?: return@composable
                 BotDetailScreen(botId = id, onBack = { nav.popBackStack() })
