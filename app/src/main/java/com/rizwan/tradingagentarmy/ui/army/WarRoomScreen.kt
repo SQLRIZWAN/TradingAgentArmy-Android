@@ -151,7 +151,7 @@ fun WarRoomScreen(vm: WarRoomViewModel = hiltViewModel()) {
                         Text(if (busy) "Round live…" else "Run round now")
                     }
                     FilterChip(selected = live, onClick = { if (live) vm.toggleLive(false) else confirmLive = true },
-                        label = { Text(if (live) "🔴 LIVE trading" else "🟢 PAPER mode") })
+                        label = { Text(if (live) "🔴 ${if (vm.prefs.bitgetDemo) "DEMO" else "LIVE"} orders" else "🟢 PAPER mode") })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     FilterChip(selected = agentsOn, onClick = { agentsOn = !agentsOn; vm.toggleAgents(agentsOn) },
@@ -234,11 +234,11 @@ fun WarRoomScreen(vm: WarRoomViewModel = hiltViewModel()) {
     if (confirmLive) {
         AlertDialog(
             onDismissRequest = { confirmLive = false },
-            title = { Text("Enable live order entry?", color = Tokens.ErrorRed) },
-            text = { Text("Army and HFT can send real orders to the configured exchange account while the service is running. Test the account first. PAPER mode sends no exchange orders.", color = Tokens.TextPrimary) },
+            title = { Text(if (vm.prefs.bitgetDemo) "Enable Demo order entry?" else "Enable live order entry?", color = Tokens.ErrorRed) },
+            text = { Text(if (vm.prefs.bitgetDemo) "Army and HFT can send orders to the configured Bitget Demo API account while the service is running. Test the Demo API key and virtual balance first. PAPER mode sends no exchange orders." else "Army and HFT can send real orders to the configured exchange account while the service is running. Test the account first. PAPER mode sends no exchange orders.", color = Tokens.TextPrimary) },
             confirmButton = {
                 TextButton(onClick = { confirmLive = false; vm.toggleLive(true) }) {
-                    Text("Enable LIVE", color = Tokens.ErrorRed)
+                    Text(if (vm.prefs.bitgetDemo) "Enable DEMO orders" else "Enable LIVE", color = Tokens.ErrorRed)
                 }
             },
             dismissButton = { TextButton(onClick = { confirmLive = false }) { Text("Stay in PAPER", color = Tokens.AccentPrimary) } }

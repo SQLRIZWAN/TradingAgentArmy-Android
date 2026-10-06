@@ -366,12 +366,13 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                         vm.update { it.copy(hftEnabled = v) }
                     }
                     HorizontalDivider(color = Tokens.BorderSubtle)
-                    SwitchRow("🔴 LIVE trading — real money (Exchange tab me Bitget keys chahiye)", s.liveTrading) { v ->
+                    SwitchRow("🔴 Exchange order entry — ${if (s.bitgetDemo) "Bitget DEMO" else "LIVE API"}", s.liveTrading) { v ->
                         if (v) confirmLiveTrading = true else vm.update { it.copy(liveTrading = false) }
                     }
                     Text(
-                        "Default PAPER mode hai — koi asli paisa nahi lagta. LIVE on karne se pehle " +
-                            "risk rules samajh lein: daily loss limit aur kill-switch Army screen par milte hain.",
+                        (if (s.bitgetDemo) "Bitget Demo API selected: exchange orders use its virtual demo account. "
+                        else "Live API selected: exchange orders can use real funds. ") +
+                            "PAPER disables exchange orders. Check the daily loss limit and kill-switch on the Army screen.",
                         color = Tokens.AccentDanger,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -504,13 +505,13 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
         AlertDialog(
             onDismissRequest = { confirmLiveTrading = false },
             containerColor = Tokens.Surface,
-            title = { Text("Enable live order entry?", color = Tokens.AccentDanger) },
-            text = { Text("Army and HFT can send real orders to the verified Bitget account while their service is running. Check the account and balance in Exchange → Test. PAPER mode sends no exchange orders.", color = Tokens.TextPrimary) },
+            title = { Text(if (s.bitgetDemo) "Enable Demo order entry?" else "Enable live order entry?", color = Tokens.AccentDanger) },
+            text = { Text(if (s.bitgetDemo) "Army and HFT can send orders to the Bitget Demo API account while their service is running. Verify the Demo API key and virtual balance in Exchange → Test. PAPER mode sends no exchange orders." else "Army and HFT can send real orders to the verified Bitget account while their service is running. Check the account and balance in Exchange → Test. PAPER mode sends no exchange orders.", color = Tokens.TextPrimary) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmLiveTrading = false
                     vm.update { it.copy(liveTrading = true) }
-                }) { Text("Enable LIVE", color = Tokens.AccentDanger) }
+                }) { Text(if (s.bitgetDemo) "Enable DEMO orders" else "Enable LIVE", color = Tokens.AccentDanger) }
             },
             dismissButton = { TextButton(onClick = { confirmLiveTrading = false }) { Text("Stay in PAPER", color = Tokens.AccentPrimary) } }
         )
