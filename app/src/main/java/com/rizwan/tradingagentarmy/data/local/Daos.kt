@@ -77,6 +77,9 @@ interface TradeDao {
 
 @Dao
 interface BotDao {
+    @Query("SELECT * FROM bots ORDER BY createdAt DESC LIMIT 100")
+    suspend fun all(): List<BotEntity>
+
     @Query("SELECT * FROM bots ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<BotEntity>>
 

@@ -16,6 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,6 +35,8 @@ class AgentArmyService : Service() {
     companion object {
         const val CHANNEL = "agent_army"
         const val NOTIF_ID = 4242
+        private val _running = MutableStateFlow(false)
+        val running: StateFlow<Boolean> = _running.asStateFlow()
         fun start(context: Context) =
             context.startForegroundService(Intent(context, AgentArmyService::class.java))
         fun stop(context: Context) = context.stopService(Intent(context, AgentArmyService::class.java))
@@ -41,6 +46,8 @@ class AgentArmyService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        _running.value = true
+        prefs.putBool("army_service_on", true)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL, "Agent Army", NotificationManager.IMPORTANCE_LOW)
@@ -75,6 +82,9 @@ class AgentArmyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        hft.stop()
+        prefs.putBool("army_service_on", false)
+        _running.value = false
         scope.cancel()
         super.onDestroy()
     }

@@ -60,6 +60,9 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
     var bitgetPassphrase: String
         get() = getString(K_BITGET_PASSPHRASE)
         set(v) = putString(K_BITGET_PASSPHRASE, v)
+    var bitgetDemo: Boolean
+        get() = getBool(K_BITGET_DEMO, false)
+        set(v) = putBool(K_BITGET_DEMO, v)
     var binanceKey: String
         get() = getString(K_BINANCE_KEY)
         set(v) = putString(K_BINANCE_KEY, v)
@@ -181,6 +184,7 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         const val K_BITGET_KEY = "bitget_key"
         const val K_BITGET_SECRET = "bitget_secret"
         const val K_BITGET_PASSPHRASE = "bitget_passphrase"
+        const val K_BITGET_DEMO = "bitget_demo"
         const val K_BINANCE_KEY = "binance_key"
         const val K_BINANCE_SECRET = "binance_secret"
         const val K_BYBIT_KEY = "bybit_key"

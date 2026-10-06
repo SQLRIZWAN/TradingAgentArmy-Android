@@ -9,14 +9,14 @@ Production Android client for the TradingAgentArmy fleet (package `com.rizwan.tr
 - **Chat** — AI trade assistant with streaming replies. Pinned model = Tier‑1 (Gemini), automatic fallback chain: Gemini → OpenAI → Claude → Ollama → offline rule‑based replies. Backend `/api/chat` is tried first when configured.
 - **Dashboard** — live market tickers (Binance/Bybit/Bitget public data), bot P&L, WS connection state.
 - **Bots** — fleet list with Demo→Live gates (Gate 1 backtest / Gate 2 paper 72h / Gate 3 micro live), bot detail with trade history + cumulative P&L chart, force‑deploy behind CONFIRM.
-- **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents chat in a War Room, read the trade DB (past results), search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications.
+- **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents can use a bounded, read-only context from local trades, bots, chat, and decision history, search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications.
 - **⚡ HFT Scalper** — fast mobile scalper (configurable polling, EMA 9/21 + RSI) with persistent Room positions, spread/slippage/fee gates, cooldown and paper-by-default safety. This is not colocated institutional HFT.
 - **🏦 Bitget** — HMAC Spot/Futures orders with deterministic local client IDs, exchange-side preset TP/SL, duplicate guards and startup reconciliation hooks. PAPER remains the default.
 - **🪙 Bitget CFD/MT5 account** — XAUUSD/EURUSD-style symbols route through Bitget's direct CFD Open API with exchange-side TP/SL and position queries. No separate server or MT5 terminal is required for this app path.
 - **📡 CFD market data** — configured Bitget CFD accounts use `/api/v3/cfd/market/tickers` for bid/ask prices and `/api/v3/cfd/market/history-candlestick` for Gold/Forex candles; public fallback data is used only when CFD credentials are not configured.
 - **📈 Trading chart** — bundled Lightweight Charts WebView with candlesticks, EMA, RSI, volume view and 1m/5m/15m/1h/1D controls. CFD 5m candles are client-aggregated from 1m data because Bitget's CFD candle API does not expose every crypto interval.
 - **📱 On-device model** — select a Gemma `.task` file (Settings → Local Model) and chat/agents run fully offline via MediaPipe.
-- **Settings** — tabbed: AI Keys / Local Model / Exchange / Backend / Army / Look. Auto-save on typing. encrypted exchange API keys (Bitget / Binance / Bybit / MT5) with connection tests, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
+- **Settings** — tabbed: AI Keys / Local Model / Exchange / Backend / Army / Look. Auto-save on typing. Encrypted exchange API keys (Bitget / Binance / Bybit) with connection tests and an explicit Bitget Demo API mode, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
 - **Notifications** — trade alerts, bot crash, circuit breaker, daily P&L summary (WorkManager, on‑demand init).
 - **Firebase** — project `sqlrrr`: anonymous auth, Firestore sync of chats/trades/bots/history, FCM. All Firebase config stays in **GitHub Secrets** — never in the repo.
 
@@ -66,7 +66,7 @@ Without the secret the app still builds and runs — Firebase features stay dorm
 
 Live Army entries require a non-HOLD plan with both SL and TP. Bitget Spot/Futures opening orders send exchange-side protection fields, and the app persists an OPEN trade with a deterministic `clientOid`. A foreground watchdog checks local open trades after restart and can issue a secondary exit for a kill-switch or local SL/TP hit. Exchange-side protection is primary; this is not a guarantee against exchange outages, slippage, rejected orders or network failure. Use API keys without withdrawal permission and validate on a demo/small account first.
 
-For Bitget CFD/MT5, create the CFD account in Bitget first, then create API keys with UTA trade/read permission. The account's CFD mode determines the symbol suffix (`XAUUSD`, `XAUUSD.s`, or `XAUUSD.pro`); configure the matching symbol in the app.
+For Bitget CFD, create the CFD account in Bitget first, then create API keys with UTA account read and UTA trade permission. For a demo key, enable **Bitget Demo API key** in Settings so requests include Bitget's `paptrading: 1` header; turn it off for a live API key. The account's CFD mode determines the symbol suffix (`XAUUSD`, `XAUUSD.s`, or `XAUUSD.pro`); configure the matching symbol in the app.
 
 ## Current live-trading boundaries
 

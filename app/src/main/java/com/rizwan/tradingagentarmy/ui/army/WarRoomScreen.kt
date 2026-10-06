@@ -66,7 +66,7 @@ class WarRoomViewModel @Inject constructor(
         prefs.putBool("live_trading", on)
         liveTrading.value = on
     }
-    fun setSymbol(s: String) = prefs.putString("army_symbol", s.uppercase().trim())
+    fun setSymbol(s: String) = prefs.putString("army_symbol", s.uppercase().replace("/", "").trim())
     fun setRoundMinutes(m: Int) = prefs.putInt("army_round_minutes", m)
     fun toggleAgents(on: Boolean) = prefs.putBool("agents_enabled", on)
     fun toggleHft(on: Boolean) = prefs.putBool("hft_enabled", on)
@@ -91,11 +91,12 @@ fun WarRoomScreen(vm: WarRoomViewModel = hiltViewModel()) {
     val hftOn by vm.hftActive.collectAsState()
     val hftSig by vm.hftSignal.collectAsState()
     val hftPos by vm.hftPosition.collectAsState()
+    val serviceOn by AgentArmyService.running.collectAsState()
     var input by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(vm.prefs.getString("army_symbol", "BTCUSDT")) }
-    var serviceOn by remember { mutableStateOf(false) }
     var agentsOn by remember { mutableStateOf(vm.prefs.getBool("agents_enabled", true)) }
     var hftEnabled by remember { mutableStateOf(vm.prefs.getBool("hft_enabled", false)) }
+    var confirmLive by remember { mutableStateOf(false) }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) {
@@ -125,12 +126,10 @@ fun WarRoomScreen(vm: WarRoomViewModel = hiltViewModel()) {
                         modifier = Modifier.weight(1f),
                         colors = outlinedColors()
                     )
-                    val scope = rememberCoroutineScope()
                     Button(
                         onClick = {
                             vm.setSymbol(symbol)
                             if (serviceOn) vm.stopService(context) else vm.startService(context)
-                            serviceOn = !serviceOn
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (serviceOn) Tokens.ErrorRed else Tokens.AccentPrimary
@@ -151,7 +150,7 @@ fun WarRoomScreen(vm: WarRoomViewModel = hiltViewModel()) {
                         Spacer(Modifier.width(6.dp))
                         Text(if (busy) "Round live…" else "Run round now")
                     }
-                    FilterChip(selected = live, onClick = { vm.toggleLive(!live) },
+                    FilterChip(selected = live, onClick = { if (live) vm.toggleLive(false) else confirmLive = true },
                         label = { Text(if (live) "🔴 LIVE trading" else "🟢 PAPER mode") })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -230,6 +229,20 @@ fun WarRoomScreen(vm: WarRoomViewModel = hiltViewModel()) {
             ) { Icon(Icons.Filled.Send, "send") }
         }
         Spacer(Modifier.height(6.dp))
+    }
+
+    if (confirmLive) {
+        AlertDialog(
+            onDismissRequest = { confirmLive = false },
+            title = { Text("Enable live order entry?", color = Tokens.ErrorRed) },
+            text = { Text("Army and HFT can send real orders to the configured exchange account while the service is running. Test the account first. PAPER mode sends no exchange orders.", color = Tokens.TextPrimary) },
+            confirmButton = {
+                TextButton(onClick = { confirmLive = false; vm.toggleLive(true) }) {
+                    Text("Enable LIVE", color = Tokens.ErrorRed)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmLive = false }) { Text("Stay in PAPER", color = Tokens.AccentPrimary) } }
+        )
     }
 }
 

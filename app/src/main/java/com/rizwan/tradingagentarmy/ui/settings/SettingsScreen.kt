@@ -63,6 +63,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
     val saved by vm.saved.collectAsState()
     val showAbout by vm.showAbout.collectAsState()
     var settingsTab by remember { mutableStateOf(0) }
+    var confirmLiveTrading by remember { mutableStateOf(false) }
     val modelPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { vm.importLocalModel(it) } }
@@ -292,12 +293,13 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             // ================= ③ EXCHANGES =================
             SectionCard(
                 step = "③",
-                title = "Exchange API Keys (Live trading)",
+                title = "Exchange API Access",
                 subtitle = "Optional — sirf tab chahiye jab app se trade execute karwana ho."
             ) {
                 SecretField("Bitget API Key", s.bitgetKey) { v -> vm.update { it.copy(bitgetKey = v) } }
                 SecretField("Bitget Secret", s.bitgetSecret) { v -> vm.update { it.copy(bitgetSecret = v) } }
                 SecretField("Bitget Passphrase", s.bitgetPassphrase) { v -> vm.update { it.copy(bitgetPassphrase = v) } }
+                SwitchRow("Bitget Demo API key (paptrading)", s.bitgetDemo) { v -> vm.update { it.copy(bitgetDemo = v) } }
                 TestRow("bitget", tests["bitget"]) { vm.testBitget() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
@@ -311,9 +313,6 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 TestRow("bybit", tests["bybit"]) { vm.testBybit() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
-                PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
-                SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
-                PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
                 Text("Bitget market", color = Tokens.TextPrimary, style = MaterialTheme.typography.bodyMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeChip("Spot", s.marketType == "SPOT") { vm.update { it.copy(marketType = "SPOT") } }
@@ -325,12 +324,11 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     PlainField("Margin (isolated/crossed)", s.futuresMargin) { v -> vm.update { it.copy(futuresMargin = v) } }
                 }
                 Text(
-                    if (s.marketType == "CFD") "Gold/Forex CFD LIVE orders use Bitget CFD Open API directly. MT5 login is not needed; use Bitget API keys with UTA trade permission and the exact Bitget CFD symbol (for example XAUUSD or XAUUSD.pro)."
-                    else "LIVE orders use exchange API keys. Start in PAPER mode, verify SL/TP and use trade-only permissions; never enable withdrawals.",
+                    if (s.marketType == "CFD") "Bitget CFD must already be opened in Bitget. MT5 login/password are not used by this app. For Demo, use a Demo API key and turn on the Demo API switch; for Live, use a Live API key and turn it off. Add UTA account read + UTA trade read/write permissions, then tap Test to verify the balance, equity, margin and open positions. Match the symbol suffix to your CFD mode (XAUUSD, XAUUSD.s or XAUUSD.pro)."
+                    else "LIVE uses the selected exchange's API. Start in PAPER mode, verify the account and SL/TP, use read/trade-only permissions, and never enable withdrawals.",
                     color = Tokens.TextSecondary,
                     style = MaterialTheme.typography.bodySmall
                 )
-                TestRow("mt5", tests["mt5"]) { vm.testMt5() }
             }
 
             }
@@ -369,7 +367,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     }
                     HorizontalDivider(color = Tokens.BorderSubtle)
                     SwitchRow("🔴 LIVE trading — real money (Exchange tab me Bitget keys chahiye)", s.liveTrading) { v ->
-                        vm.update { it.copy(liveTrading = v) }
+                        if (v) confirmLiveTrading = true else vm.update { it.copy(liveTrading = false) }
                     }
                     Text(
                         "Default PAPER mode hai — koi asli paisa nahi lagta. LIVE on karne se pehle " +
@@ -499,6 +497,22 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             confirmButton = {
                 TextButton(onClick = { vm.dismissAbout() }) { Text("Close", color = Tokens.AccentPrimary) }
             }
+        )
+    }
+
+    if (confirmLiveTrading) {
+        AlertDialog(
+            onDismissRequest = { confirmLiveTrading = false },
+            containerColor = Tokens.Surface,
+            title = { Text("Enable live order entry?", color = Tokens.AccentDanger) },
+            text = { Text("Army and HFT can send real orders to the verified Bitget account while their service is running. Check the account and balance in Exchange → Test. PAPER mode sends no exchange orders.", color = Tokens.TextPrimary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmLiveTrading = false
+                    vm.update { it.copy(liveTrading = true) }
+                }) { Text("Enable LIVE", color = Tokens.AccentDanger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmLiveTrading = false }) { Text("Stay in PAPER", color = Tokens.AccentPrimary) } }
         )
     }
 }

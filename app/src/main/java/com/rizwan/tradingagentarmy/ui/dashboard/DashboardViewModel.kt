@@ -120,8 +120,9 @@ class DashboardViewModel @Inject constructor(
     fun closePosition(id: Long) {
         viewModelScope.launch {
             val trade = tradeDao.all().firstOrNull { it.id == id } ?: return@launch
+            val isLong = trade.side.equals("BUY", true) || trade.side.equals("LONG", true)
             val price = if (trade.marketType == "CFD") {
-                bitget.cfdPrice(trade.symbol, if (trade.side == "BUY") "sell" else "buy").getOrDefault(0.0)
+                bitget.cfdPrice(trade.symbol, if (isLong) "sell" else "buy").getOrDefault(0.0)
             } else toolsLastPrice(trade.symbol)
             if (price <= 0.0) return@launch
             val live = trade.mode.equals("live", true) || trade.mode.equals("hft-live", true)
@@ -130,13 +131,13 @@ class DashboardViewModel @Inject constructor(
                     "CFD" -> {
                         val positionId = trade.positionId.ifBlank {
                             bitget.cfdPositionList(trade.symbol).getOrDefault(emptyList())
-                                .firstOrNull { it.symbol.equals(trade.symbol, true) }?.positionId.orEmpty()
+                                .firstOrNull { it.symbol.equals(trade.symbol, true) && it.side.equals(if (isLong) "BUY" else "SELL", true) }?.positionId.orEmpty()
                         }
                         bitget.closeCfdPosition(positionId, trade.quantity).ok
                     }
                     "FUTURES" -> bitget.closeFuturesMarket(
                         trade.symbol,
-                        if (trade.side == "BUY") "sell" else "buy",
+                        if (isLong) "sell" else "buy",
                         "%.8f".format(trade.quantity),
                         "manual_exit_${trade.id}_${System.currentTimeMillis()}"
                     ).ok
@@ -147,7 +148,7 @@ class DashboardViewModel @Inject constructor(
                 }
             }.getOrDefault(false)
             if (result) {
-                val pnl = if (trade.side == "BUY") (price - trade.entry) * trade.quantity else (trade.entry - price) * trade.quantity
+                val pnl = if (isLong) (price - trade.entry) * trade.quantity else (trade.entry - price) * trade.quantity
                 tradeDao.closeTrade(trade.id, price, pnl, "MANUAL_CLOSE")
                 refresh()
             }
@@ -307,7 +308,12 @@ class DashboardViewModel @Inject constructor(
             val total = botRepo.pnlSince(0)
             _portfolio.value = marketRepo.portfolio(today, total)
         }
-        runCatching { _trades.value = botRepo.allTrades().take(10) }
+        runCatching {
+            val all = botRepo.allTrades()
+            val open = all.filter { it.status in setOf("OPEN", "PAPER_OPEN", "EXIT_PENDING", "UNKNOWN") || it.exit == null }
+            val closed = all.filter { it.status == "CLOSED" }.take(10)
+            _trades.value = (open + closed).distinctBy { it.id }.sortedByDescending { it.timestamp }
+        }
         _backendAlive.value = marketRepo.backendAlive()
         _lastSync.value = System.currentTimeMillis()
         val now = System.currentTimeMillis()

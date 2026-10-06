@@ -2,10 +2,16 @@ package com.rizwan.tradingagentarmy.agents
 
 import com.rizwan.tradingagentarmy.data.local.TradeDao
 import com.rizwan.tradingagentarmy.data.remote.MarketApi
+import com.rizwan.tradingagentarmy.data.repository.LocalDatabaseContext
 import com.rizwan.tradingagentarmy.trading.BitgetClient
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
+import android.text.Html
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
@@ -17,7 +23,8 @@ import javax.inject.Singleton
 class AgentTools @Inject constructor(
     private val marketApi: MarketApi,
     private val tradeDao: TradeDao,
-    private val bitget: BitgetClient
+    private val bitget: BitgetClient,
+    private val databaseContext: LocalDatabaseContext
 ) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
@@ -27,24 +34,42 @@ class AgentTools @Inject constructor(
     suspend fun webSearch(query: String): String = withContext(Dispatchers.IO) {
         runCatching {
             val q = URLEncoder.encode(query, "UTF-8")
-            val html = http.newCall(
-                Request.Builder().url("https://lite.duckduckgo.com/lite/?q=$q").build()
-            ).execute().use { it.body?.string().orEmpty() }
-            val results = mutableListOf<String>()
-            val linkIter = Regex("result-link[^>]*href=\"([^\"]+)\"").findAll(html)
-            val titleIter = Regex("result-snippet\"[^>]*>(.*?)</td>", RegexOption.DOT_MATCHES_ALL).findAll(html)
-            val links = linkIter.map { it.groupValues[1] }.toList()
-            val titles = titleIter.map { it.groupValues[1].replace(Regex("<[^>]+>"), "").trim() }.toList()
-            for (i in titles.indices.take(6)) {
-                results += "- ${titles[i]} ${links.getOrNull(i)?.let { "($it)" } ?: ""}"
+            val request = Request.Builder()
+                .url("https://html.duckduckgo.com/html/?q=$q")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml")
+                .get()
+                .build()
+            val (code, html) = http.newCall(request).execute().use { response ->
+                response.code to response.body?.string().orEmpty()
             }
-            if (results.isEmpty()) {
-                Regex("<a[^>]*class=\"result-link\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
-                    .findAll(html).take(6).forEach { results += "- " + it.groupValues[1].replace(Regex("<[^>]+>"), "") }
-            }
-            results.joinToString("\n").ifBlank { "NO RESULTS" }
+            if (code !in 200..299) error("search provider HTTP $code")
+            val anchors = Regex(
+                "<a[^>]+class=[\"'][^\"']*(?:result-link|result__a)[^\"']*[\"'][^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            ).findAll(html).take(8).toList()
+            val snippets = Regex(
+                "<(?:td|div)[^>]+class=[\"'][^\"']*(?:result-snippet|result__snippet)[^\"']*[\"'][^>]*>(.*?)</(?:td|div)>",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            ).findAll(html).map { cleanHtml(it.groupValues[1]) }.toList()
+            anchors.mapIndexedNotNull { index, match ->
+                val title = cleanHtml(match.groupValues[2])
+                val link = match.groupValues[1].replace("&amp;", "&")
+                if (title.isBlank()) null else buildString {
+                    append("- ").append(title)
+                    if (snippets.getOrNull(index).orEmpty().isNotBlank()) append(" — ").append(snippets[index])
+                    append(" (").append(link).append(')')
+                }
+            }.joinToString("\n").ifBlank { "NO WEB RESULTS returned by search provider (HTTP 200, no result links)." }
         }.getOrElse { "SEARCH FAILED: ${it.message}" }
     }
+
+    private fun cleanHtml(fragment: String): String = Html.fromHtml(
+        fragment.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), " "),
+        Html.FROM_HTML_MODE_LEGACY
+    ).toString().replace(Regex("\\s+"), " ").trim()
+
+    suspend fun appDatabaseContext(): String = databaseContext.build()
 
     suspend fun marketSnapshot(limit: Int = 14): String = runCatching {
         val tickers = marketApi.fullWatchlist()
@@ -80,18 +105,24 @@ class AgentTools @Inject constructor(
                 val url = "https://api.binance.com/api/v3/klines?symbol=${sym.uppercase()}&interval=$interval&limit=$limit"
                 val body = http.newCall(Request.Builder().url(url).build())
                     .execute().use { it.body?.string().orEmpty() }
-                val rows = Regex("\\[(.*?)\\]").findAll(body).map { it.groupValues[1] }.toList()
-                if (rows.isEmpty()) return@runCatching "NO CANDLE DATA"
-                rows.takeLast(30).joinToString("\n") { r ->
-                    val p = r.split(",").mapNotNull { it.trim('"').toDoubleOrNull() }
-                    if (p.size >= 5) "O=${p[0]} H=${p[2]} L=${p[3]} C=${p[4]} V=${p[5]}" else r
-                }
+                val rows = Json { isLenient = true }.parseToJsonElement(body) as? JsonArray
+                    ?: return@runCatching "CANDLE DATA FAILED: exchange response was not an array"
+                rows.takeLast(30).mapNotNull { row ->
+                    val values = row as? JsonArray ?: return@mapNotNull null
+                    if (values.size < 6) return@mapNotNull null
+                    val open = values[1].jsonPrimitive.content
+                    val high = values[2].jsonPrimitive.content
+                    val low = values[3].jsonPrimitive.content
+                    val close = values[4].jsonPrimitive.content
+                    val volume = values[5].jsonPrimitive.content
+                    "O=$open H=$high L=$low C=$close V=$volume"
+                }.joinToString("\n").ifBlank { "NO CANDLE DATA" }
             }.getOrElse { "CANDLE DATA FAILED: ${it.message}" }
         }
 
-    suspend fun lastPrice(symbol: String): Double = withContext(Dispatchers.IO) {
+    suspend fun lastPrice(symbol: String, side: String = "buy"): Double = withContext(Dispatchers.IO) {
         if (isCfdSymbol(symbol)) {
-            return@withContext bitget.cfdPrice(symbol.replace("/", "")).getOrDefault(0.0)
+            return@withContext bitget.cfdPrice(symbol.replace("/", ""), side).getOrDefault(0.0)
         }
         runCatching {
             val sym = symbol.replace("/", "").uppercase()

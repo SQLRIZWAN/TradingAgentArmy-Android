@@ -36,23 +36,25 @@ class LiveTradeSupervisor @Inject constructor(
         if (started) return
         started = true
         scope.launch {
-            reconcile()
             while (isActive) {
+                runCatching { reconcile() }
+                    .onFailure { AppEvents.record("reconcile", "snapshot error: ${it.message}") }
                 runCatching { monitorOnce() }
                     .onFailure { AppEvents.record("reconcile", "monitor error: ${it.message}") }
-                delay(5_000)
+                delay(15_000)
             }
         }
     }
 
     private suspend fun reconcile() {
-        if (!prefs.getBool("live_trading", false) || !bitget.configured) return
+        // Sync existing exchange positions even while live order entry is disabled.
+        if (!bitget.configured) return
         val syncAt = System.currentTimeMillis()
         trades.markPendingUnknown(syncAt)
         val local = trades.openTrades()
         val cfdLocal = local.filter {
             it.marketType == "CFD" && (it.mode.equals("live", true) || it.mode.equals("hft-live", true))
-        }
+        }.toMutableList()
         val remote = bitget.cfdPositionList().getOrElse {
             AppEvents.record("reconcile", "cfd snapshot failed: ${it.message}")
             return
@@ -66,7 +68,7 @@ class LiveTradeSupervisor @Inject constructor(
             val existing = trades.byPositionId(position.positionId)
                 ?: cfdLocal.firstOrNull {
                     it.positionId.isBlank() && it.symbol.equals(position.symbol, true) &&
-                        ((it.side == "BUY" && position.side == "BUY") || (it.side == "SELL" && position.side == "SELL"))
+                        normalizeSide(it.side) == normalizeSide(position.side)
                 }
             if (existing == null) {
                 trades.insert(
@@ -96,6 +98,7 @@ class LiveTradeSupervisor @Inject constructor(
                 )
                 AppEvents.record("reconcile", "recovered ${position.symbol}/${position.positionId}")
             } else {
+                cfdLocal.removeAll { it.id == existing.id }
                 trades.updateExchangeState(
                     existing.id, position.positionId, position.openPrice, position.openPrice,
                     position.quantity, position.quantity, position.stopLoss, position.takeProfit,
@@ -105,9 +108,10 @@ class LiveTradeSupervisor @Inject constructor(
             }
         }
         cfdLocal.filter { it.positionId.isNotBlank() && it.positionId !in remoteIds }.forEach { stale ->
-            val price = tools.lastPrice(stale.symbol)
+            val isLong = normalizeSide(stale.side) == "BUY"
+            val price = tools.lastPrice(stale.symbol, if (isLong) "sell" else "buy")
             if (price > 0.0) {
-                val pnl = if (stale.side == "BUY") (price - stale.entry) * stale.quantity else (stale.entry - price) * stale.quantity
+                val pnl = if (isLong) (price - stale.entry) * stale.quantity else (stale.entry - price) * stale.quantity
                 trades.closeTrade(stale.id, price, pnl, "RECONCILED_CLOSED")
                 AppEvents.record("reconcile", "closed local stale ${stale.symbol}/${stale.positionId}")
             }
@@ -123,24 +127,26 @@ class LiveTradeSupervisor @Inject constructor(
     }
 
     private suspend fun monitorOnce() {
-        if (!prefs.getBool("live_trading", false) || !bitget.configured) return
+        // Turning off live entry must not turn off protection/reconciliation for open positions.
+        if (!bitget.configured) return
         for (trade in trades.openTrades()) {
             if (!trade.mode.equals("live", true) && !trade.mode.equals("hft-live", true)) continue
-            val price = tools.lastPrice(trade.symbol)
+            val isLong = normalizeSide(trade.side) == "BUY"
+            val price = tools.lastPrice(trade.symbol, if (isLong) "sell" else "buy")
             if (price <= 0.0) continue
             val hit = when {
                 prefs.getBool("risk_kill", false) -> "KILL_SWITCH"
-                trade.side == "BUY" && trade.stopLoss != null && price <= trade.stopLoss -> "SL"
-                trade.side == "BUY" && trade.takeProfit != null && price >= trade.takeProfit -> "TP"
-                trade.side == "SELL" && trade.stopLoss != null && price >= trade.stopLoss -> "SL"
-                trade.side == "SELL" && trade.takeProfit != null && price <= trade.takeProfit -> "TP"
+                isLong && trade.stopLoss != null && price <= trade.stopLoss -> "SL"
+                isLong && trade.takeProfit != null && price >= trade.takeProfit -> "TP"
+                !isLong && trade.stopLoss != null && price >= trade.stopLoss -> "SL"
+                !isLong && trade.takeProfit != null && price <= trade.takeProfit -> "TP"
                 else -> null
             } ?: continue
 
             // State transition is persisted before the network call: a crash or
             // retry cannot submit the same exit twice from this process.
             trades.setStatus(trade.id, "EXIT_PENDING")
-            val closeSide = if (trade.side == "BUY") "sell" else "buy"
+            val closeSide = if (isLong) "sell" else "buy"
             val oid = "exit_${trade.clientOid.ifBlank { trade.id.toString() }}_$hit"
             val result = if (trade.marketType == "CFD") {
                 val positionId = trade.positionId.ifBlank {
@@ -155,7 +161,7 @@ class LiveTradeSupervisor @Inject constructor(
                 bitget.closeSpotMarket(trade.symbol, closeSide, trade.quantity, oid)
             }
             if (result.ok) {
-                val pnl = if (trade.side == "BUY") (price - trade.entry) * trade.quantity else (trade.entry - price) * trade.quantity
+                val pnl = if (isLong) (price - trade.entry) * trade.quantity else (trade.entry - price) * trade.quantity
                 trades.closeTrade(trade.id, price, pnl, hit)
                 AppEvents.record("exit", "${trade.symbol} $hit @ $price")
                 Notifier.post(context, "agent_army", "Position closed: $hit", "${trade.symbol} @ $price", high = true)
@@ -164,6 +170,12 @@ class LiveTradeSupervisor @Inject constructor(
                 AppEvents.record("exit", "${trade.symbol} exit failed: ${result.message}")
             }
         }
+    }
+
+    private fun normalizeSide(side: String): String = when (side.uppercase()) {
+        "BUY", "LONG" -> "BUY"
+        "SELL", "SHORT" -> "SELL"
+        else -> side.uppercase()
     }
 
     fun stop() = scope.cancel()
