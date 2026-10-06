@@ -2,6 +2,7 @@ package com.rizwan.tradingagentarmy.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -9,15 +10,39 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SecurePreferences @Inject constructor(@ApplicationContext context: Context) {
+class SecurePreferences @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val prefs: SharedPreferences by lazy {
+    private val prefs: SharedPreferences by lazy { openPrefs() }
+
+    /**
+     * EncryptedSharedPreferences throws on first use when the AndroidKeyStore key is
+     * gone (cloud-restored data, keystore wipe, OEM bug). That exception used to escape
+     * into Application.onCreate and crash-loop the app before a single frame rendered.
+     * Rebuild the store instead; only the stored keys are lost, the app stays usable.
+     */
+    private fun openPrefs(): SharedPreferences {
+        return runCatching { createEncrypted() }
+            .getOrElse { first ->
+                Log.e(TAG, "secure_prefs init failed, rebuilding: ${first.message}")
+                runCatching {
+                    context.deleteSharedPreferences(PREFS_FILE)
+                    context.deleteSharedPreferences("$PREFS_FILE.bak")
+                }
+                runCatching { createEncrypted() }
+                    .getOrElse { second ->
+                        Log.e(TAG, "encrypted prefs unrecoverable, falling back to plain: ${second.message}")
+                        context.getSharedPreferences("$PREFS_FILE.plain", Context.MODE_PRIVATE)
+                    }
+            }
+    }
+
+    private fun createEncrypted(): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        EncryptedSharedPreferences.create(
+        return EncryptedSharedPreferences.create(
             context,
-            "secure_prefs",
+            PREFS_FILE,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
@@ -181,6 +206,8 @@ class SecurePreferences @Inject constructor(@ApplicationContext context: Context
         set(v) = prefs.edit().putInt(K_REFRESH, v).apply()
 
     companion object {
+        private const val TAG = "SecurePrefs"
+        private const val PREFS_FILE = "secure_prefs"
         const val K_BITGET_KEY = "bitget_key"
         const val K_BITGET_SECRET = "bitget_secret"
         const val K_BITGET_PASSPHRASE = "bitget_passphrase"
