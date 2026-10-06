@@ -176,7 +176,7 @@ class ChatViewModel @Inject constructor(
             val answer = if (plan == null) {
                 "Trade request did not produce an executable plan. Army status: ${army.status.value}. No trade is confirmed; check account connection and agent/provider status."
             } else {
-                val orderActivity = army.messages.value.lastOrNull { it.contains("order", true) || it.contains("trade", true) || it.contains("blocked", true) }
+                val orderActivity = army.messages.value.firstOrNull { it.content.contains("order", true) || it.content.contains("trade", true) || it.content.contains("blocked", true) }?.content
                 buildString {
                     appendLine("Trade request processed · ${plan.action} ${plan.symbol} · confidence ${plan.confidence}%")
                     appendLine("Entry: ${plan.entry ?: "not supplied"} · SL: ${plan.stopLoss ?: "not supplied"} · TP: ${plan.takeProfit ?: "not supplied"}")

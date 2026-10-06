@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,6 +49,8 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
+import com.rizwan.tradingagentarmy.agents.AgentArmyService
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
 import com.rizwan.tradingagentarmy.ui.theme.AppFonts
@@ -63,6 +66,8 @@ import android.webkit.WebViewClient
 
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
+    val context = LocalContext.current
+    val armyRunning by AgentArmyService.running.collectAsState()
     val tickers by viewModel.tickers.collectAsState()
     val portfolio by viewModel.portfolio.collectAsState()
     val trades by viewModel.trades.collectAsState()
@@ -86,18 +91,22 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
         item {
             Column(
                 Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    "Trading command center",
-                    color = Tokens.TextPrimary,
-                    style = MaterialTheme.typography.headlineSmall
-                )
                 Text(
                     "AI Army · markets · positions · risk",
                     color = Tokens.TextSecondary,
                     style = MaterialTheme.typography.bodySmall
                 )
+                Surface(color=if(armyRunning) Tokens.AccentPrimary.copy(alpha=.10f) else Tokens.Surface, shape=RoundedCornerShape(14.dp), modifier=Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text(if(armyRunning) "Agent Army is live" else "Agent Army is paused",color=Tokens.TextPrimary,style=MaterialTheme.typography.titleSmall)
+                            Text(if(armyRunning) "24/7 service is running" else "Start the background market watch",color=Tokens.TextSecondary,style=MaterialTheme.typography.bodySmall)
+                        }
+                        Button(onClick={ if(armyRunning) AgentArmyService.stop(context) else AgentArmyService.start(context) }) { Text(if(armyRunning) "Turn off" else "Turn on") }
+                    }
+                }
             }
         }
         item {
