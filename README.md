@@ -6,17 +6,20 @@
 Production Android client for the TradingAgentArmy fleet (package `com.rizwan.tradingagentarmy`, version **3.0.1**).
 
 ## Features
-- **Chat** — AI trade assistant with streaming replies. Pinned model = Tier‑1 (Gemini), automatic fallback chain: Gemini → OpenAI → Claude → Ollama → offline rule‑based replies. Backend `/api/chat` is tried first when configured.
-- **Dashboard** — live market tickers (Binance/Bybit/Bitget public data), bot P&L, WS connection state.
-- **Bots** — fleet list with Demo→Live gates (Gate 1 backtest / Gate 2 paper 72h / Gate 3 micro live), bot detail with trade history + cumulative P&L chart, force‑deploy behind CONFIRM.
-- **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents can use a bounded, read-only context from local trades, bots, chat, and decision history, search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications.
+- **🧭 4-tab navigation** — bottom bar with **Dashboard / Market / Army Chat / Bots+Positions**, plus a top-bar gear for Settings. Chart and bot detail open as pushed routes.
+- **Chat** — AI trade assistant with streaming replies. Pinned model = Tier‑1 (Gemini), automatic fallback chain: Gemini → OpenAI → Claude → Ollama → offline rule‑based replies. Backend `/api/chat` is tried first when configured. Chat trade requests route through the Army (`executeOrders=false` preview, explicit confirm for live).
+- **Dashboard** — live market tickers (Binance/Bybit/Bitget public data), bot P&L, WS connection state, circuit-breaker card, and the 24/7 Army on/off switch with live status.
+- **📊 Market** — top-100 coins (CoinGecko), forex rates (Frankfurter) and spot metals (gold/silver/platinum/palladium), each row opening a full-screen chart.
+- **📈 Chart** — TradingView advanced chart WebView (`assets/tradingview_chart.html`) with candlesticks, EMA, RSI, volume view and 1m/5m/15m/1h/1D controls, driven by live candles from Binance / Bybit / Bitget. If the TradingView assets fail to load, an offline fallback chart draws the same candles natively. CFD 5m candles are client-aggregated from 1m data because Bitget's CFD candle API does not expose every crypto interval.
+- **🏟️ Army Chat** — the autonomous agent war-room: the Army narrates every round (gathering data → analysis → risk → decision) and auto-runs a **1-minute agent tick** when the service is on. Operator commands: `help`, `start army` / `stop army` (also `army on|off`, `chalu karo`, `band karo`), `run round [brief]`, `status`, `risk status`, `positions`, `bots`, `symbol <SYM>`, `scalp on|off`, `kill` / `kill off`.
+- **🤖 AI Agent Army (14 agents)** — News/Sentiment/Technical/On-Chain/Chart analysts + Bull vs Bear debate + Trader + Risk Manager + Portfolio Manager. Agents can use a bounded, read-only context from local trades, bots, chat, and decision history, search the web (DDG), and reach a BUY/SELL/HOLD decision with entry/SL/TP. 24/7 foreground service + notifications. Prompts enforce autonomous 24/7 operation and constant progress reporting.
+- **Bots / Futures / Forex-Gold (Fleet)** — fleet list with Demo→Live gates (Gate 1 backtest / Gate 2 paper 72h / Gate 3 micro live), bot detail with trade history + cumulative P&L chart, force‑deploy behind CONFIRM. Futures (USDT-perp) and Forex/Gold (CFD) bots get their own tabs, and the HFT scalp engine can auto-derive a position from an army decision.
 - **⚡ HFT Scalper** — fast mobile scalper (configurable polling, EMA 9/21 + RSI) with persistent Room positions, spread/slippage/fee gates, cooldown and paper-by-default safety. This is not colocated institutional HFT.
 - **🏦 Bitget** — HMAC Spot/Futures orders with deterministic local client IDs, exchange-side preset TP/SL, duplicate guards and startup reconciliation hooks. PAPER remains the default.
 - **🪙 Bitget CFD/MT5 account** — XAUUSD/EURUSD-style symbols route through Bitget's direct CFD Open API with exchange-side TP/SL and position queries. No separate server or MT5 terminal is required for this app path.
 - **📡 CFD market data** — configured Bitget CFD accounts use `/api/v3/cfd/market/tickers` for bid/ask prices and `/api/v3/cfd/market/history-candlestick` for Gold/Forex candles; public fallback data is used only when CFD credentials are not configured.
-- **📈 Trading chart** — bundled Lightweight Charts WebView with candlesticks, EMA, RSI, volume view and 1m/5m/15m/1h/1D controls. CFD 5m candles are client-aggregated from 1m data because Bitget's CFD candle API does not expose every crypto interval.
 - **📱 On-device model** — select a Gemma `.task` file (Settings → Local Model) and chat/agents run fully offline via MediaPipe.
-- **Settings** — tabbed: AI Keys / Local Model / Exchange / Backend / Army / Look. Auto-save on typing. Encrypted exchange API keys (Bitget / Binance / Bybit) with connection tests and an explicit Bitget Demo API mode, AI provider keys + model pickers + key tests, fallback chain reorder (↑↓), backend REST/WS endpoints, notification preferences, AMOLED theme, danger zone.
+- **Settings** — one tab per integration: `🔑 AI` (provider keys, model pickers, key tests, fallback chain reorder ↑↓, local Gemma `.task` model), `🏦 Bitget` (**DEMO API mode** with `paptrading: 1`, connection test), `📊 Binance`, `📈 Bybit` (keys + connection tests), `🥇 MT5/CFD` (CFD account test, symbol-suffix auto-detect for `XAUUSD` / `.s` / `.pro`), `🌐 Backend` (REST/WS endpoints), `🤖 Army` (minute tick, risk/scalping fields, notification preferences), `🎨 Look` (AMOLED theme, danger zone). Auto-save on typing; exchange keys stored encrypted via Android Keystore.
 - **Notifications** — trade alerts, bot crash, circuit breaker, daily P&L summary (WorkManager, on‑demand init).
 - **Firebase** — project `sqlrrr`: anonymous auth, Firestore sync of chats/trades/bots/history, FCM. All Firebase config stays in **GitHub Secrets** — never in the repo.
 
@@ -61,6 +64,23 @@ To rotate the config later:
 2. `gh secret set GOOGLE_SERVICES_JSON < app/google-services.json`
 
 Without the secret the app still builds and runs — Firebase features stay dormant and everything works locally via Room.
+
+## Risk & scalping defaults
+
+Defaults ship tuned for aggressive scalping — all values are editable under `Settings → 🤖 Army` and are enforced by `RiskGuard` on every entry (paper and live):
+
+| Setting | Default |
+|---|---|
+| Max daily loss | `10000` |
+| Max size per trade | `1000` |
+| Max trades per day | `20000` |
+| Block after consecutive losses | **off** |
+| Scalp TP % / SL % | `0.10` / `0.10` |
+| Scalp dollar target | `$1` |
+| HFT cooldown | `5 s` |
+| 1-minute autonomous agent tick | **on** (when Army service is running) |
+
+`RiskGuard.evaluate(size, live)` runs on both paper and live paths; live is additionally gated by the Army's non-HOLD + SL/TP rule below. Relaxing these further removes most of the app's remaining protection — change them knowingly.
 
 ## Live-trading safety
 
