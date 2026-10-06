@@ -111,6 +111,7 @@ class SettingsViewModel @Inject constructor(
             bitgetKey = prefs.bitgetKey,
             bitgetSecret = prefs.bitgetSecret,
             bitgetPassphrase = prefs.bitgetPassphrase,
+            bitgetDemo = prefs.bitgetDemo,
             binanceKey = prefs.binanceKey,
             binanceSecret = prefs.binanceSecret,
             bybitKey = prefs.bybitKey,
@@ -121,7 +122,6 @@ class SettingsViewModel @Inject constructor(
             marketType = prefs.getString("bitget_market_type", "SPOT"),
             futuresProduct = prefs.getString("bitget_product_type", "USDT-FUTURES"),
             futuresMargin = prefs.getString("bitget_margin_mode", "isolated"),
-            bitgetDemo = prefs.getBool("bitget_demo", false),
             cfdSuffix = prefs.getString("bitget_cfd_suffix", ""),
             geminiKey = prefs.geminiKey,
             geminiModel = prefs.geminiModel,
@@ -274,6 +274,7 @@ class SettingsViewModel @Inject constructor(
         prefs.bitgetKey = s.bitgetKey.trim()
         prefs.bitgetSecret = s.bitgetSecret.trim()
         prefs.bitgetPassphrase = s.bitgetPassphrase.trim()
+        prefs.bitgetDemo = s.bitgetDemo
         prefs.binanceKey = s.binanceKey.trim()
         prefs.binanceSecret = s.binanceSecret.trim()
         prefs.bybitKey = s.bybitKey.trim()
@@ -284,7 +285,6 @@ class SettingsViewModel @Inject constructor(
         prefs.putString("bitget_market_type", s.marketType)
         prefs.putString("bitget_product_type", s.futuresProduct.trim().ifBlank { "USDT-FUTURES" })
         prefs.putString("bitget_margin_mode", s.futuresMargin.trim().ifBlank { "isolated" })
-        prefs.putBool("bitget_demo", s.bitgetDemo)
         prefs.putString("bitget_cfd_suffix", s.cfdSuffix.trim())
         prefs.geminiKey = s.geminiKey.trim()
         prefs.geminiModel = s.geminiModel.trim()
@@ -303,7 +303,7 @@ class SettingsViewModel @Inject constructor(
         prefs.themeMode = s.themeMode
         prefs.localModelPath = s.localModelPath
         prefs.localModelEnabled = s.localModelEnabled
-        prefs.putString("army_symbol", s.armySymbol.uppercase().trim().ifBlank { "BTCUSDT" })
+        prefs.putString("army_symbol", s.armySymbol.uppercase().replace("/", "").trim().ifBlank { "BTCUSDT" })
         prefs.putBool("agents_enabled", s.agentsEnabled)
         prefs.putInt("army_round_minutes", s.roundMinutes)
         prefs.putBool("hft_enabled", s.hftEnabled)
@@ -400,14 +400,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun testBitget() = test("bitget") {
-        val r = bitgetClient.testConnection()
+    fun testBitget() {
+        save(silent = true)
+        val marketType = _state.value.marketType
+        test("bitget") {
+        val r = bitgetClient.testConnection(marketType)
         if (r.ok) r.message else throw IllegalStateException(r.message)
+        }
     }
 
     fun testCfd() = test("cfd") {
         save(silent = true)
-        val r = bitgetClient.testCfdAccount()
+        val r = bitgetClient.testConnection("CFD")
         if (r.ok) {
             val suffix = runCatching { bitgetClient.autoDetectCfdSuffix() }.getOrDefault("")
             if (suffix.isNotBlank()) _state.value = _state.value.copy(cfdSuffix = suffix)
@@ -430,10 +434,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun testMt5() = test("mt5") {
-        val s = _state.value
-        if (s.mt5Login.isBlank() || s.mt5Password.isBlank()) throw IllegalStateException("Login/Password set karein")
-        // MT5 has no public REST ping; validated end-to-end by the backend connector.
-        "Saved · MT5 validation backend par hoga (${s.mt5Server.ifBlank { "server?" }})"
+        throw IllegalStateException("Not connected · this app's CFD trading uses Bitget API keys; MT5 login/password are not used or validated")
     }
 
     fun testGemini() = test("gemini") { ai.testGemini() }

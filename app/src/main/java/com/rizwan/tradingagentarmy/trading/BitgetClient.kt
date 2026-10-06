@@ -39,6 +39,15 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         val unrealizedPnl: Double,
         val totalProfit: Double
     )
+    data class CfdAccountSnapshot(
+        val currency: String,
+        val balance: Double,
+        val equity: Double,
+        val freeMargin: Double,
+        val unrealizedPnl: Double,
+        val accountStatus: String,
+        val openPositions: Int
+    )
 
     val configured: Boolean
         get() = prefs.bitgetKey.isNotBlank() && prefs.bitgetSecret.isNotBlank() && prefs.bitgetPassphrase.isNotBlank()
@@ -65,7 +74,7 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
             .addHeader("ACCESS-TIMESTAMP", ts)
             .addHeader("ACCESS-PASSPHRASE", prefs.bitgetPassphrase)
             .addHeader("Content-Type", "application/json")
-            .apply { if (demoMode) addHeader("paptrading", "1") }
+            .apply { if (prefs.bitgetDemo) addHeader("paptrading", "1") }
             .apply { if (method == "POST") post(body.toRequestBody("application/json".toMediaType())) else get() }
             .build()
         http.newCall(req).execute().use { it.code to (it.body?.string().orEmpty()) }
@@ -89,45 +98,18 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         )
     }.getOrElse { OrderResult(false, "Invalid exchange response: ${it.message}") }
 
-    suspend fun testConnection(): BitgetResult {
+    suspend fun testConnection(marketType: String = prefs.getString("bitget_market_type", "SPOT")): BitgetResult {
         if (!configured) return BitgetResult(false, "Bitget API key/secret/passphrase missing")
-        val (code, body) = call("GET", "/api/v2/spot/account/info")
-        val r = parse(body)
-        return if (r.ok) BitgetResult(true, if (demoMode) "OK (DEMO · paptrading:1)" else "OK")
-        else BitgetResult(false, "HTTP $code · ${r.message}")
-    }
-
-    /**
-     * Real CFD / MT5-equivalent account check: Bitget CFD fund detail.
-     * Confirms the key has CFD permission AND that a CFD account exists
-     * (open it on bitget.com first — the API cannot create one).
-     */
-    suspend fun testCfdAccount(): BitgetResult {
-        if (!configured) return BitgetResult(false, "Bitget API keys missing")
-        val (code, body) = call("GET", "/api/v3/cfd/account/fund-detail")
-        val r = parse(body)
-        if (!r.ok) {
-            val hint = when {
-                code == 401 || body.contains("40101", true) || body.contains("40102", true) ->
-                    "auth failed — demo keys banate waqt Demo mode ON rakhein"
-                body.contains("not", true) && body.contains("found", true) ->
-                    "CFD account nahi mila — bitget.com par MT5/CFD account khol lein"
-                else -> r.message
+        return when (marketType.uppercase()) {
+            "CFD" -> testCfdConnection()
+            "FUTURES" -> testFuturesConnection()
+            else -> {
+                val (code, body) = call("GET", "/api/v2/spot/account/info")
+                val r = parse(body)
+                if (code in 200..299 && r.ok) BitgetResult(true, "Spot API connected · authenticated account read succeeded")
+                else BitgetResult(false, "Spot account check failed · HTTP $code · ${r.message}")
             }
-            return BitgetResult(false, "HTTP $code · $hint")
         }
-        val equity = runCatching {
-            val o = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
-            o?.get("equity")?.jsonPrimitive?.content
-                ?: o?.get("accountEquity")?.jsonPrimitive?.content
-        }.getOrNull() ?: ""
-        return BitgetResult(
-            true,
-            buildString {
-                append(if (demoMode) "DEMO CFD OK" else "CFD OK")
-                if (equity.isNotBlank()) append(" · equity $equity")
-            }
-        )
     }
 
     /** Available CFD symbols incl. account-mode suffix (.s / .pro / none). */
@@ -161,7 +143,79 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         val suffix = xau.uppercase().removePrefix("XAUUSD")
         prefs.putString("bitget_cfd_suffix", suffix)
         return suffix
+
     }
+
+    suspend fun cfdAccountSnapshot(): Result<CfdAccountSnapshot> = runCatching {
+        if (!configured) error("Bitget API key/secret/passphrase missing")
+        val (code, body) = call("GET", "/api/v3/cfd/account/fund-detail")
+        val response = parse(body)
+        if (code !in 200..299 || !response.ok) error("CFD fund query HTTP $code · ${response.message}")
+        val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
+            ?: error("Bitget returned no CFD account data")
+        val positions = cfdPositionList().getOrElse { error("CFD balance is readable, but open positions could not be read · ${it.message}") }
+        CfdAccountSnapshot(
+            currency = data.string("currency") ?: "USD",
+            balance = data.number("balance"),
+            equity = data.number("equity"),
+            freeMargin = data.number("marginFree"),
+            unrealizedPnl = data.number("pnl"),
+            accountStatus = data.string("status") ?: "unknown",
+            openPositions = positions.size
+        )
+    }
+
+    private suspend fun testCfdConnection(): BitgetResult {
+        val (infoCode, infoBody) = call("GET", "/api/v3/account/info")
+        val infoResult = parse(infoBody)
+        if (infoCode !in 200..299 || !infoResult.ok) {
+            return BitgetResult(false, "Bitget API authentication failed · HTTP $infoCode · ${infoResult.message}")
+        }
+        val info = runCatching { json.parseToJsonElement(infoBody).jsonObject["data"]?.jsonObject }.getOrNull()
+        val permType = info?.string("permType").orEmpty()
+        val permissions = (info?.get("permissions") as? JsonArray)
+            ?.mapNotNull { runCatching { it.jsonPrimitive.content }.getOrNull() }
+            .orEmpty()
+        if (permType.equals("read-only", true) || "uta_trade" !in permissions) {
+            return BitgetResult(false, "API key authenticated, but UTA trade permission is missing. Enable UTA read/write trading permission for CFD orders.")
+        }
+        if ("withdraw" in permissions) {
+            // Keep the connection usable, while making an unnecessary high-risk permission visible.
+            val account = cfdAccountSnapshot()
+            return account.fold(
+                onSuccess = { s -> BitgetResult(true, formatCfdSnapshot(s) + " · API key also has withdrawal permission; remove it if not needed") },
+                onFailure = { BitgetResult(false, "API key has UTA trade permission, but CFD account verification failed · ${it.message}") }
+            )
+        }
+        return cfdAccountSnapshot().fold(
+            onSuccess = { BitgetResult(true, formatCfdSnapshot(it)) },
+            onFailure = { BitgetResult(false, "CFD API key is not ready · ${it.message}") }
+        )
+    }
+
+    private suspend fun testFuturesConnection(): BitgetResult {
+        val product = prefs.getString("bitget_product_type", "USDT-FUTURES")
+        val (code, body) = call("GET", "/api/v2/mix/account/accounts?productType=$product")
+        val response = parse(body)
+        if (code !in 200..299 || !response.ok) return BitgetResult(false, "Futures account check failed · HTTP $code · ${response.message}")
+        val rows = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
+        val account = rows.firstOrNull()?.jsonObject ?: return BitgetResult(false, "Futures API connected, but no $product account was returned")
+        val available = account.number("available")
+        val equity = account.number("accountEquity")
+        val positions = currentFuturesPositions()
+        if (!positions.first) return BitgetResult(false, "Futures balance is readable, but positions query failed · ${parse(positions.second).message}")
+        val count = runCatching { json.parseToJsonElement(positions.second).jsonObject["data"] as? JsonArray }.getOrNull()?.size ?: 0
+        return BitgetResult(true, "$product connected · available ${"%.2f".format(Locale.US, available)} USDT · equity ${"%.2f".format(Locale.US, equity)} USDT · open positions $count")
+    }
+
+    private fun formatCfdSnapshot(snapshot: CfdAccountSnapshot): String =
+        "Bitget ${if (prefs.bitgetDemo) "DEMO" else "LIVE"} CFD API connected · ${snapshot.accountStatus} · balance ${"%.2f".format(Locale.US, snapshot.balance)} ${snapshot.currency} · equity ${"%.2f".format(Locale.US, snapshot.equity)} ${snapshot.currency} · free margin ${"%.2f".format(Locale.US, snapshot.freeMargin)} ${snapshot.currency} · floating P&L ${"%.2f".format(Locale.US, snapshot.unrealizedPnl)} ${snapshot.currency} · open positions ${snapshot.openPositions}"
+
+    private fun kotlinx.serialization.json.JsonObject.string(key: String): String? =
+        this[key]?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }
+
+    private fun kotlinx.serialization.json.JsonObject.number(key: String): Double =
+        string(key)?.toDoubleOrNull() ?: 0.0
 
     suspend fun spotPrice(symbol: String): String {
         val (code, body) = call("GET", "/api/v2/spot/market/tickers?symbol=${symbol.uppercase()}")

@@ -136,7 +136,8 @@ class AgentArmy @Inject constructor(
         post(AgentRole.COORDINATOR, "👤 Operator: $text", kind = "user")
         val cmd = Commander.parse(text)
         if (cmd != null && executeCommand(cmd)) return
-        val reply = ask(AgentRole.COORDINATOR, "The operator said: $text\nRespond as the team commander in max 3 lines.")
+        val memory = tools.appDatabaseContext()
+        val reply = ask(AgentRole.COORDINATOR, "The operator said: $text\n\nRead-only local database memory:\n$memory\n\nRespond as the team commander in max 3 lines.")
         post(AgentRole.COORDINATOR, reply)
     }
 
@@ -240,12 +241,12 @@ class AgentArmy @Inject constructor(
         }
     }
 
-    suspend fun runRound(userBrief: String = "") {
-        if (_busy.value) return
+    suspend fun runRound(userBrief: String = "", executeOrders: Boolean = true): TradePlan? {
+        if (_busy.value) return null
         _busy.value = true
         try {
             roundId = System.currentTimeMillis()
-            val symbol = prefs.getString("army_symbol", "BTCUSDT").ifBlank { "BTCUSDT" }
+            val symbol = requestedSymbol(userBrief)
             _status.value = "Round live — $symbol"
             AppEvents.record("round", "started for $symbol")
 
@@ -260,6 +261,7 @@ class AgentArmy @Inject constructor(
             val search = tools.webSearch("$symbol market news today")
             val history = tools.pastTradesSummary()
             val appLog = tools.appActivity()
+            val databaseMemory = tools.appDatabaseContext()
 
             val dataPack = """
 MARKET SNAPSHOT:
@@ -272,6 +274,8 @@ WEB SEARCH for "$symbol":
 $search
 
 $history
+
+$databaseMemory
 
 $appLog
 """.trim()
@@ -327,10 +331,15 @@ $appLog
             )
 
             _status.value = "⚙️ Decision execute ho raha hai…"
-            execute(plan)
+            if (executeOrders) {
+                execute(plan)
+            } else {
+                post(AgentRole.COORDINATOR, "ℹ️ Research-only request: no order was submitted.", kind = "system")
+            }
 
-            _status.value = "Round complete — last decision: ${plan.action} ${plan.symbol}"
-            AppEvents.record("round", "finished with ${plan.action}")
+            _status.value = (if (executeOrders) "Round complete" else "Research complete; execution skipped") + " — ${plan.action} ${plan.symbol}"
+            AppEvents.record("round", "finished with ${plan.action}; executeOrders=$executeOrders")
+            return plan
         } catch (c: CancellationException) {
             _status.value = "Round cancelled"
             throw c
@@ -338,6 +347,7 @@ $appLog
             _status.value = "Round error: ${e.message}"
             AppEvents.record("error", "round failed: ${e.message}")
             runCatching { post(AgentRole.COORDINATOR, "⚠️ Round failed: ${e.message}", kind = "system") }
+            return null
         } finally {
             _busy.value = false
         }
@@ -345,14 +355,27 @@ $appLog
 
     private fun parsePlan(raw: String, symbol: String): TradePlan {
         val candidate = Regex("\\{.*\\}", RegexOption.DOT_MATCHES_ALL).find(raw)?.value ?: raw
-        return runCatching { json.decodeFromString<TradePlan>(candidate) }
+        val parsed = runCatching { json.decodeFromString<TradePlan>(candidate) }
             .getOrElse {
                 runCatching { json.decodeFromString<TradePlan>(extractJson(candidate)) }
                     .getOrElse {
-                        TradePlan(action = if (raw.contains("BUY", true)) "BUY" else if (raw.contains("SELL", true)) "SELL" else "HOLD",
-                            symbol = symbol, confidence = 40, reasoning = raw.take(120))
+                        TradePlan(action = "HOLD", symbol = symbol, confidence = 0, reasoning = raw.take(120))
                     }
-            }.let { if (it.symbol.isBlank()) it.copy(symbol = symbol) else it }
+            }
+        val action = parsed.action.uppercase()
+        val normalizedSymbol = parsed.symbol.ifBlank { symbol }.uppercase().replace("/", "")
+        if (action !in setOf("BUY", "SELL", "HOLD") || !normalizedSymbol.matches(Regex("[A-Z0-9./_-]{3,24}"))) {
+            return TradePlan(action = "HOLD", symbol = symbol, confidence = 0, reasoning = "Invalid model plan; order was rejected.")
+        }
+        return parsed.copy(action = action, symbol = normalizedSymbol, confidence = parsed.confidence.coerceIn(0, 100))
+    }
+
+    private fun requestedSymbol(brief: String): String {
+        val upper = brief.uppercase()
+        Regex("\\b(?:BTC/?USDT|ETH/?USDT|SOL/?USDT|XAUUSD(?:\\.S|\\.PRO)?|XAGUSD(?:\\.S|\\.PRO)?|EURUSD(?:\\.S|\\.PRO)?|GBPUSD(?:\\.S|\\.PRO)?|USDJPY(?:\\.S|\\.PRO)?|AUDUSD(?:\\.S|\\.PRO)?|USDCAD|USDCHF)\\b")
+            .find(upper)?.value?.replace("/", "")?.let { return it }
+        if (Regex("\\b(gold|xau|sona)\\b", RegexOption.IGNORE_CASE).containsMatchIn(brief)) return "XAUUSD"
+        return prefs.getString("army_symbol", "BTCUSDT").ifBlank { "BTCUSDT" }.uppercase()
     }
 
     private fun extractJson(s: String): String {
@@ -364,8 +387,7 @@ $appLog
         if (plan.action == "HOLD" || plan.action.isBlank()) return
         if (plan.symbol.isBlank()) return
         val live = prefs.getBool("live_trading", false)
-        val mt5Symbol = plan.symbol.uppercase().replace("/", "") in setOf("XAUUSD", "XAUUSD.S", "XAUUSD.PRO", "EURUSD", "EURUSD.S", "EURUSD.PRO", "GBPUSD", "USDJPY")
-        val marketType = if (mt5Symbol) "CFD" else prefs.getString("bitget_market_type", "SPOT").uppercase()
+        val marketType = if (tools.isCfdSymbol(plan.symbol)) "CFD" else prefs.getString("bitget_market_type", "SPOT").uppercase()
         val isLive = live && bitget.configured
         val size = risk.capSize(plan.sizeUsd ?: 10.0)
         val deny = risk.evaluate(size, isLive)
@@ -374,10 +396,21 @@ $appLog
             Notifier.post(context, "agent_army", "🛡️ Risk blocked a trade", deny, high = true)
             return
         }
-        val price = tools.lastPrice(plan.symbol)
+        val price = tools.lastPrice(plan.symbol, if (plan.action == "BUY") "buy" else "sell")
+        if (price <= 0.0 || !price.isFinite()) {
+            post(AgentRole.RISK, "🛑 ORDER BLOCKED: no valid live price for ${plan.symbol}; check market data and symbol spelling", kind = "decision")
+            return
+        }
         if (live && !bitget.configured) {
             post(AgentRole.RISK, "🛑 LIVE blocked: Bitget API keys with CFD/UTA trade permission are missing", kind = "decision")
             return
+        }
+        if (live) {
+            val connection = bitget.testConnection(marketType)
+            if (!connection.ok) {
+                post(AgentRole.RISK, "🛑 LIVE blocked: ${connection.message}", kind = "decision")
+                return
+            }
         }
         val clientOid = "army_${plan.symbol}_${roundId}_${plan.action.lowercase()}"
         if (tradeDao.byClientOid(clientOid) != null) {

@@ -38,6 +38,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,6 +52,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import com.rizwan.tradingagentarmy.agents.AgentArmyService
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.rizwan.tradingagentarmy.domain.model.MarketTicker
 import com.rizwan.tradingagentarmy.domain.model.Trade
@@ -65,6 +68,8 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
+    val armyRunning by AgentArmyService.running.collectAsState()
     val portfolio by viewModel.portfolio.collectAsState()
     val trades by viewModel.trades.collectAsState()
     val openTrades by viewModel.openTrades.collectAsState()

@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rizwan.tradingagentarmy.data.local.SecurePreferences
 import com.rizwan.tradingagentarmy.data.repository.ChatRepository
+import com.rizwan.tradingagentarmy.agents.AgentArmy
+import com.rizwan.tradingagentarmy.agents.AgentArmyService
 import com.rizwan.tradingagentarmy.domain.model.ChatMessage
 import com.rizwan.tradingagentarmy.ui.navigation.CommandBus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,8 +27,11 @@ class ChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repo: ChatRepository,
     private val prefs: SecurePreferences,
-    val bus: CommandBus
+    val bus: CommandBus,
+    private val army: AgentArmy
 ) : ViewModel() {
+
+    val armyActivity = army.messages
 
     val messages: StateFlow<List<ChatMessage>> =
         repo.messages().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -75,7 +80,21 @@ class ChatViewModel @Inject constructor(
             _busy.value = true
             runCatching {
                 repo.addUser(text)
-                streamIntoNewRow(text)
+                when (operatorCommand(text)) {
+                    OperatorCommand.START_ARMY -> {
+                        AgentArmyService.start(context)
+                        saveImmediateReply(
+                            "Agent Army service start requested. Current trading mode: ${if (prefs.getBool("live_trading", false)) "LIVE" else "PAPER"}. Starting the service does not confirm an exchange connection; check Settings → Exchange → Test and watch the Army status."
+                        )
+                    }
+                    OperatorCommand.STOP_ARMY -> {
+                        AgentArmyService.stop(context)
+                        saveImmediateReply("Agent Army service stop requested. Existing exchange positions remain open and continue to be synchronized; use the dashboard to review or close them.")
+                    }
+                    OperatorCommand.RESEARCH -> runResearch(text)
+                    OperatorCommand.TRADE -> runTrading(text)
+                    null -> streamIntoNewRow(text)
+                }
             }.onFailure { e ->
                 _banner.value = "Error: ${e.message?.take(120)}"
             }
@@ -120,6 +139,84 @@ class ChatViewModel @Inject constructor(
         _streamText.value = ""
     }
 
+    private suspend fun saveImmediateReply(text: String) {
+        val id = repo.addPendingAi()
+        repo.completeAssistantMessage(id, text, "app-command")
+        _modelChip.value = "app-command"
+    }
+
+    private suspend fun runResearch(userText: String) {
+        val id = repo.addPendingAi()
+        _streamingId.value = id
+        _streamText.value = "Army team researching…"
+        try {
+            val plan = army.runRound(userBrief = userText, executeOrders = false)
+            val answer = if (plan == null) {
+                "Army research did not complete: ${army.status.value}. No order was submitted. Check the status and AI/provider settings, then retry."
+            } else {
+                buildString {
+                    appendLine("Army research complete · research only; no order was submitted.")
+                    appendLine("Decision: ${plan.action} ${plan.symbol} · confidence ${plan.confidence}%")
+                    if (plan.action != "HOLD") appendLine("Entry: ${plan.entry ?: "market quote"} · SL: ${plan.stopLoss ?: "not supplied"} · TP: ${plan.takeProfit ?: "not supplied"} · size: ${plan.sizeUsd?.let { "$$it" } ?: "not supplied"}")
+                    append("Reason: ${plan.reasoning.ifBlank { "No explanation returned by the model." }}")
+                }.trim()
+            }
+            repo.completeAssistantMessage(id, answer, "agent-army-research")
+            _modelChip.value = "agent-army"
+        } finally {
+            _streamingId.value = null
+            _streamText.value = ""
+        }
+    }
+
+    private suspend fun runTrading(userText: String) {
+        val id = repo.addPendingAi()
+        _streamingId.value = id
+        _streamText.value = "Army team checking account, risk limits, and market signals…"
+        try {
+            val plan = army.runRound(userBrief = userText, executeOrders = true)
+            val answer = if (plan == null) {
+                "Trade request did not produce an executable plan. Army status: ${army.status.value}. No trade is confirmed; check account connection and agent/provider status."
+            } else {
+                val orderActivity = army.messages.value.firstOrNull { it.content.contains("order", true) || it.content.contains("trade", true) || it.content.contains("blocked", true) }?.content
+                buildString {
+                    appendLine("Trade request processed · ${plan.action} ${plan.symbol} · confidence ${plan.confidence}%")
+                    appendLine("Entry: ${plan.entry ?: "not supplied"} · SL: ${plan.stopLoss ?: "not supplied"} · TP: ${plan.takeProfit ?: "not supplied"}")
+                    appendLine("Execution: ${orderActivity ?: if (plan.action.equals("HOLD", true)) "No order submitted; the army chose HOLD." else "Check dashboard positions and exchange order history for the confirmed result."}")
+                    append("Reason: ${plan.reasoning.ifBlank { "No explanation returned by the model." }}")
+                }.trim()
+            }
+            repo.completeAssistantMessage(id, answer, "agent-army-trade")
+            _modelChip.value = "agent-army"
+        } finally {
+            _streamingId.value = null
+            _streamText.value = ""
+        }
+    }
+
+    private fun operatorCommand(text: String): OperatorCommand? {
+        val q = text.lowercase().replace(Regex("\\s+"), " ").trim()
+        val startCommand = listOf(
+            "start army", "start the army", "army start", "army chalu", "army shuru",
+            "start agents", "start the agents", "agents start", "agent team start", "start agent team",
+            "start 24/7", "24/7 start", "run army"
+        ).any { it in q }
+        val stopCommand = listOf(
+            "stop army", "stop the army", "army stop", "army band", "army pause",
+            "stop agents", "stop the agents", "agents stop", "agents band", "agent team stop",
+            "stop agent team", "stop 24/7", "24/7 stop", "pause army"
+        ).any { it in q }
+        if (startCommand) return OperatorCommand.START_ARMY
+        if (stopCommand) return OperatorCommand.STOP_ARMY
+        if (listOf("research", "analyse", "analyze", "analysis", "market report", "market check", "research karo", "research kar").any { it in q }) {
+            return OperatorCommand.RESEARCH
+        }
+        if (listOf("trade", "place order", "buy", "sell", "entry lo", "trade lagao", "trade le", "order lagao", "execute trade").any { it in q }) {
+            return OperatorCommand.TRADE
+        }
+        return null
+    }
+
     fun copy(text: String) {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("chat", text))
@@ -141,4 +238,6 @@ class ChatViewModel @Inject constructor(
         _showClearDialog.value = false
         viewModelScope.launch { repo.clear() }
     }
+
+    private enum class OperatorCommand { START_ARMY, STOP_ARMY, RESEARCH, TRADE }
 }

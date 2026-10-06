@@ -17,7 +17,8 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val dao: ChatDao,
     private val ai: GetAiResponseUseCase,
-    private val firebase: FirebaseSync
+    private val firebase: FirebaseSync,
+    private val databaseContext: LocalDatabaseContext
 ) {
     fun messages(): Flow<List<ChatMessage>> = dao.observeAll().map { list ->
         list.map {
@@ -47,6 +48,14 @@ class ChatRepository @Inject constructor(
             ChatMessageEntity(role = "AI", content = "", model = null, timestamp = System.currentTimeMillis())
         )
 
+    suspend fun completeAssistantMessage(id: Long, text: String, model: String) {
+        val timestamp = System.currentTimeMillis()
+        dao.updateContent(id, text, model)
+        firebase.pushChat(
+            ChatMessageEntity(id = id, role = "AI", content = text, model = model, timestamp = timestamp)
+        )
+    }
+
     /**
      * Streams an assistant reply into row [aiId].
      * [historyParam] must already exclude the current user turn.
@@ -57,7 +66,7 @@ class ChatRepository @Inject constructor(
         aiId: Long,
         onDelta: suspend (String) -> Unit
     ): AiResult {
-        val result = ai.stream(userText, historyParam, onDelta)
+        val result = ai.stream(userText, historyParam, databaseContext.build(), onDelta)
         dao.updateContent(aiId, result.text, result.model)
         firebase.pushChat(
             ChatMessageEntity(

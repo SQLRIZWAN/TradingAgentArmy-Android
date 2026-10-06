@@ -1,17 +1,22 @@
 package com.rizwan.tradingagentarmy.ui.navigation
 
+import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CandlestickChart
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -44,21 +49,45 @@ private val tabs = listOf(
 )
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun RootApp() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route
 
     val showBar = current == null || tabs.any { it.route == current } ||
-        current?.startsWith("bot_detail") == true || current?.startsWith("chat") == true
+        current.startsWith("bot_detail")
 
     Scaffold(
         containerColor = Tokens.BackgroundBase,
+        topBar = {
+            if (showBar) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            when (current) {
+                                "dashboard" -> "Trading command center"
+                                "market" -> "Markets"
+                                "army" -> "Army Chat"
+                                "fleet" -> "Bots & positions"
+                                else -> "Trading Army"
+                            },
+                            color = Tokens.TextPrimary
+                        )
+                    },
+                    actions = {
+                        IconButton(onClick = { nav.navigate("settings") }) {
+                            Icon(Icons.Filled.Settings, "Settings", tint = Tokens.TextSecondary)
+                        }
+                    }
+                )
+            }
+        },
         bottomBar = {
             if (showBar) {
                 NavigationBar(containerColor = Tokens.Surface) {
                     tabs.forEach { tab ->
-                        val selected = if (current?.startsWith("bot_detail") == true || current == "chat")
+                        val selected = if (current?.startsWith("bot_detail") == true)
                             tab.route == "fleet" else current == tab.route
                         NavigationBarItem(
                             selected = selected,
@@ -93,7 +122,7 @@ fun RootApp() {
                 DashboardScreen(onOpenSettings = { nav.navigate("settings") })
             }
             composable("market") {
-                MarketScreen(onOpenChart = { symbol -> nav.navigate("chart/${java.net.URLEncoder.encode(symbol, "UTF-8")}") })
+                MarketScreen(onOpenChart = { symbol -> nav.navigate("chart/${Uri.encode(symbol)}") })
             }
             composable("army") { ArmyChatScreen() }
             composable("fleet") {
@@ -105,8 +134,7 @@ fun RootApp() {
                 "chart/{symbol}",
                 arguments = listOf(navArgument("symbol") { type = NavType.StringType })
             ) { entry ->
-                val raw = entry.arguments?.getString("symbol") ?: "BTCUSDT"
-                val symbol = java.net.URLDecoder.decode(raw, "UTF-8")
+                val symbol = Uri.decode(entry.arguments?.getString("symbol") ?: "BTCUSDT")
                 ChartScreen(symbol = symbol, timeframe = "5m", onBack = { nav.popBackStack() })
             }
             composable("bot_detail/{botId}") { entry ->

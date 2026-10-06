@@ -261,8 +261,7 @@ private fun CoinRowItem(coin: com.rizwan.tradingagentarmy.data.remote.MarketApi.
                     color = if (coin.change24h >= 0) Tokens.AccentPrimary else Tokens.AccentDanger,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = AppFonts.Mono)
                 )
-            }
-        }
+            }        }
     }
 }
 
@@ -312,5 +311,4 @@ private fun changeText(change: Double): String =
 private fun formatPrice(p: Double): String = when {
     p >= 1000 -> "%,.2f".format(p)
     p >= 1 -> "%,.4f".format(p)
-    else -> "%,.5f".format(p)
-}
+    else -> "%,.5f".format(p)}
