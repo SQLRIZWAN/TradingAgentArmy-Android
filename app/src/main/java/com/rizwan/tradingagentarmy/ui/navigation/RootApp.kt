@@ -3,8 +3,8 @@ package com.rizwan.tradingagentarmy.ui.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -13,6 +13,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -23,6 +27,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import android.net.Uri
 import com.rizwan.tradingagentarmy.ui.army.WarRoomScreen
 import com.rizwan.tradingagentarmy.ui.bots.BotDetailScreen
 import com.rizwan.tradingagentarmy.ui.bots.BotsScreen
@@ -30,18 +35,20 @@ import com.rizwan.tradingagentarmy.ui.chat.ChatScreen
 import com.rizwan.tradingagentarmy.ui.dashboard.DashboardScreen
 import com.rizwan.tradingagentarmy.ui.settings.SettingsScreen
 import com.rizwan.tradingagentarmy.ui.theme.Tokens
+import com.rizwan.tradingagentarmy.ui.market.MarketScreen
+import com.rizwan.tradingagentarmy.ui.market.ChartScreen
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    Tab("chat", "Chat", Icons.Filled.Forum),
-    Tab("dashboard", "Markets", Icons.Filled.Dashboard),
-    Tab("bots", "Bots", Icons.Filled.SmartToy),
-    Tab("army", "Army", Icons.Filled.Groups),
-    Tab("settings", "Settings", Icons.Filled.Tune)
+    Tab("dashboard", "Dashboard", Icons.Filled.Dashboard),
+    Tab("markets", "Market", Icons.Filled.ShowChart),
+    Tab("chat", "Army Chat", Icons.Filled.Forum),
+    Tab("bots", "Bots", Icons.Filled.SmartToy)
 )
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun RootApp() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
@@ -49,6 +56,12 @@ fun RootApp() {
 
     Scaffold(
         containerColor = Tokens.BackgroundBase,
+        topBar = {
+            if (current != "settings" && current != "chat" && current?.startsWith("chart/") != true) {
+                TopAppBar(title = { Text(when(current) { "dashboard" -> "Trading command center"; "markets" -> "Markets"; "chat" -> "Army Chat"; "bots" -> "Bots & positions"; else -> "Trading Army" }) },
+                    actions = { IconButton(onClick = { nav.navigate("settings") }) { Icon(Icons.Filled.Settings, "Settings") } })
+            }
+        },
         bottomBar = {
             if (tabs.any { it.route == current } || current?.startsWith("bot_detail") == true) {
                 NavigationBar(containerColor = Tokens.Surface) {
@@ -58,7 +71,7 @@ fun RootApp() {
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
-                                nav.navigate(tab.route) {
+                                nav.navigate(if (tab.route == "chat") "chat" else tab.route) {
                                     popUpTo(nav.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
@@ -86,6 +99,8 @@ fun RootApp() {
         ) {
             composable("chat") { ChatScreen() }
             composable("dashboard") { DashboardScreen() }
+            composable("markets") { MarketScreen(onChart = { symbol -> nav.navigate("chart/${Uri.encode(symbol)}") }) }
+            composable("chart/{symbol}") { entry -> ChartScreen(Uri.decode(entry.arguments?.getString("symbol").orEmpty()), onBack = { nav.popBackStack() }) }
             composable("bots") {
                 BotsScreen(onOpen = { id -> nav.navigate("bot_detail/$id") })
             }
