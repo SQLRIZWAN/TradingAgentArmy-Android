@@ -7,7 +7,8 @@
     #chart{width:100%;height:100%}
     #badge{position:fixed;top:8px;right:10px;font-size:10px;color:#8de6c0;background:#18332f;padding:4px 7px;border-radius:6px;z-index:2}
   </style>
-  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="lightweight-charts.standalone.production.js"></script>
+  <script>window.LWC_URL="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js";</script>
 </head>
 <body>
 <div id="badge">LIVE MARKET DATA</div><div id="root"><div id="chart"></div></div>
@@ -15,7 +16,9 @@
 let chart, candles, emaLine, rsiLine, volume;
 function ema(values, period){let k=2/(period+1), out=[], e=values[0]||0; values.forEach((v,i)=>{e=i===0?v:v*k+e*(1-k);out.push(e)});return out}
 function rsi(values, period){let out=values.map(()=>50), gain=0,loss=0; for(let i=1;i<values.length;i++){let d=values[i]-values[i-1];gain+=Math.max(0,d);loss+=Math.max(0,-d);if(i>=period){let rs=loss===0?100:gain/Math.max(loss,.00000001);out[i]=100-100/(1+rs);let old=values[i-period+1]-values[i-period];gain-=Math.max(0,old);loss-=Math.max(0,-old)}} return out}
+function fail(msg){let n=document.getElementById('failnote');if(!n){n=document.createElement('div');n.id='failnote';n.style.cssText='position:fixed;left:12px;right:12px;bottom:14px;font-size:11px;color:#ffb4a8;background:#3a1d22;padding:8px 10px;border-radius:8px;z-index:3';document.body.appendChild(n)}n.textContent=msg}
 function init(){
+  if(typeof LightweightCharts==='undefined'){fail('Chart engine load nahi hua — internet check karein ya Retry dabayein');return false}
   chart=LightweightCharts.createChart(document.getElementById('chart'),{layout:{background:{color:'#101722'},textColor:'#9aaac0'},grid:{vertLines:{color:'#1c2938'},horzLines:{color:'#1c2938'}},rightPriceScale:{borderColor:'#26364a'},timeScale:{borderColor:'#26364a',timeVisible:true},crosshair:{mode:LightweightCharts.CrosshairMode.Normal}});
   candles=chart.addCandlestickSeries({upColor:'#48d6a5',downColor:'#ff647c',borderUpColor:'#48d6a5',borderDownColor:'#ff647c',wickUpColor:'#48d6a5',wickDownColor:'#ff647c'});
   emaLine=chart.addLineSeries({color:'#f5b942',lineWidth:1,priceLineVisible:false});
@@ -25,9 +28,9 @@ function init(){
   window.addEventListener('resize',()=>chart.applyOptions({width:innerWidth,height:innerHeight}));
 }
 function setBars(raw){
-  if(!chart) init();
+  if(!chart && init()===false) return;
   let bars=(raw||[]).filter(x=>x.ts>0).map(x=>({time:Math.floor(x.ts/1000),open:x.o,high:x.h,low:x.l,close:x.c}));
-  if(!bars.length)return;
+  if(!bars.length){fail("Candles khaali hain — market data nahi mila");return}
   candles.setData(bars);
   let closes=bars.map(x=>x.close), e=ema(closes,20), r=rsi(closes,14);
   emaLine.setData(bars.map((x,i)=>({time:x.time,value:e[i]})));
@@ -35,7 +38,14 @@ function setBars(raw){
   volume.setData(bars.map(x=>({time:x.time,value:Math.max(0,x.close-x.open),color:x.close>=x.open?'#234b43':'#542d3a'})));
   chart.timeScale().fitContent();
 }
-init();
+(function boot(){
+  if(typeof LightweightCharts!=='undefined'){init();return}
+  let sc=document.createElement('script');
+  sc.src=window.LWC_URL;
+  sc.onload=init;
+  sc.onerror=function(){fail('Chart engine offline hai — lightweight-charts local asset bhi load nahi hui')};
+  document.head.appendChild(sc);
+})();
 </script>
 </body>
 </html>
