@@ -119,7 +119,12 @@ fun RootApp() {
             modifier = Modifier.padding(padding)
         ) {
             composable("dashboard") {
-                DashboardScreen(onOpenSettings = { nav.navigate("settings") })
+                DashboardScreen(
+                    onOpenSettings = { nav.navigate("settings") },
+                    onOpenMarket = { nav.navigate("market") { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true } },
+                    onOpenArmy = { nav.navigate("army") { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true } },
+                    onOpenBots = { nav.navigate("fleet") { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true } }
+                )
             }
             composable("market") {
                 MarketScreen(onOpenChart = { symbol -> nav.navigate("chart/${Uri.encode(symbol)}") })

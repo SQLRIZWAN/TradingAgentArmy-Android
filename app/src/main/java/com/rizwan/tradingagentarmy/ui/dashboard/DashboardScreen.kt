@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -66,6 +67,9 @@ import java.util.Locale
 @Composable
 fun DashboardScreen(
     onOpenSettings: () -> Unit,
+    onOpenMarket: () -> Unit = {},
+    onOpenArmy: () -> Unit = {},
+    onOpenBots: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -96,22 +100,60 @@ fun DashboardScreen(
     ) {
         // ---------------- header ----------------
         item {
-            Row(
+            Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Dashboard", color = Tokens.TextPrimary, style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        if (serviceOn) "⚔️ Army 24/7 chal rahi hai" else "Army band hai — neeche 24/7 ON karein",
-                        color = if (serviceOn) Tokens.AccentPrimary else Tokens.TextSecondary,
-                        style = MaterialTheme.typography.bodySmall
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Trading command center", color = Tokens.TextPrimary, style = MaterialTheme.typography.headlineSmall)
+                        Text(
+                            if (serviceOn) "⚔️ Army 24/7 chal rahi hai · har minute ek agent scan"
+                            else "Army band hai — neeche 24/7 ON karein",
+                            color = if (serviceOn) Tokens.AccentPrimary else Tokens.TextSecondary,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, "Settings", tint = Tokens.TextSecondary)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusPill(
+                        label = if (serviceOn) "⚔️ Army ON" else "⚔️ Army OFF",
+                        good = serviceOn,
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatusPill(
+                        label = if (liveTrading) "🔴 LIVE" else "🟢 PAPER",
+                        good = !liveTrading,
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatusPill(
+                        label = if (wsConnected) "● Live feed" else "● Polling",
+                        good = wsConnected,
+                        modifier = Modifier.weight(1f)
                     )
                 }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Filled.Settings, "Settings", tint = Tokens.TextSecondary)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusPill(
+                        label = if (backendAlive || noBackend) "🌐 Backend OK" else "🌐 No backend",
+                        good = backendAlive || noBackend,
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatusPill(
+                        label = "⟳ " + if (lastSync == 0L) "—" else SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(lastSync)),
+                        good = lastSync > 0L,
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatusPill(
+                        label = "$totalTrades trades",
+                        good = true,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
@@ -183,7 +225,45 @@ fun DashboardScreen(
                             "Bots" to "${(p?.activeRunning ?: 0) + (p?.activeDemo ?: 0)}"
                         )
                     )
+                    val closed = trades.filter { it.status == "CLOSED" }
+                    val wins = closed.count { it.pnl > 0 }
+                    val unrealized = openTrades.sumOf { it.unrealizedPnl }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        MiniValue(
+                            "Win rate",
+                            if (closed.isEmpty()) "—" else "${wins * 100 / closed.size}%",
+                            if (closed.isNotEmpty() && wins * 2 >= closed.size) Tokens.AccentPrimary else Tokens.TextPrimary
+                        )
+                        MiniValue(
+                            "Unrealized",
+                            (if (unrealized >= 0) "+$" else "-$") + "%.2f".format(kotlin.math.abs(unrealized)),
+                            if (unrealized >= 0) Tokens.AccentPrimary else Tokens.AccentDanger
+                        )
+                        MiniValue(
+                            "Running bots",
+                            "${p?.activeRunning ?: 0} live · ${p?.activeDemo ?: 0} demo",
+                            Tokens.TextPrimary
+                        )
+                    }
                 }
+            }
+        }
+
+        // ---------------- quick tiles ----------------
+        item {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickTile("📈", "Charts", onOpenMarket, Modifier.weight(1f))
+                QuickTile("🏟️", "Army Chat", onOpenArmy, Modifier.weight(1f))
+                QuickTile("🤖", "Bots", onOpenBots, Modifier.weight(1f))
+                QuickTile("⚙️", "Settings", onOpenSettings, Modifier.weight(1f))
             }
         }
 
@@ -663,5 +743,46 @@ private fun MiniValue(label: String, value: String, color: androidx.compose.ui.g
     Column(Modifier.width(76.dp)) {
         Text(label, color = Tokens.TextSecondary, style = MaterialTheme.typography.labelSmall)
         Text(value, color = color, style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.Mono))
+    }
+}
+
+@Composable
+private fun StatusPill(label: String, good: Boolean, modifier: Modifier = Modifier) {
+    Surface(
+        color = if (good) Tokens.AccentPrimary.copy(alpha = 0.12f) else Tokens.Surface,
+        shape = RoundedCornerShape(20.dp),
+        modifier = modifier
+    ) {
+        Text(
+            label,
+            color = if (good) Tokens.AccentPrimary else Tokens.TextSecondary,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+        )
+    }
+}
+
+@Composable
+private fun QuickTile(emoji: String, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        color = Tokens.Surface,
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.clickable { onClick() }
+    ) {
+        Column(
+            Modifier.padding(vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(emoji, style = MaterialTheme.typography.titleMedium)
+            Text(
+                label,
+                color = Tokens.TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        }
     }
 }
