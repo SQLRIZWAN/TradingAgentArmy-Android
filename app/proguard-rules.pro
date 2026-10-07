@@ -31,3 +31,14 @@
 
 # MediaPipe tasks-genai: protobuf annotations are compile-time only (runtime = protobuf-javalite via Firebase)
 -dontwarn com.google.protobuf.**
+
+# ---- Hilt @LazyClassKey / R8 class merging -------------------------------------
+# DaggerApp_HiltComponents_SingletonC.getViewModelKeys() builds an
+# ImmutableMap<String, Boolean> from @IdentifierNameString constants that hold the
+# @HiltViewModel class names. R8 merged com...ui.bots.BotsViewModel into another
+# class, so its constant was rewritten to that class's obfuscated name and two
+# entries shared one key — the app died on the first hiltViewModel() call with:
+#   java.lang.IllegalArgumentException: Multiple entries with same key: X=true and X=true
+# Keeping every ViewModel class distinct keeps those constants distinct.
+# https://github.com/google/dagger/issues/4323
+-keep,allowobfuscation class * extends androidx.lifecycle.ViewModel { *; }
