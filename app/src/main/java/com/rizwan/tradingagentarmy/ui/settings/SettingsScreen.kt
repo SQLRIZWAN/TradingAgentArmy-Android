@@ -295,6 +295,26 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 step = "🏦",
                 title = "Bitget API (Spot · Futures · CFD/Gold)",
                 subtitle = "Bitget par keys bana kar yahan daalein — DEMO aur LIVE dono support hain."            ) {
+                Surface(
+                    color = Tokens.AccentPrimary.copy(alpha = 0.07f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "🔑 Demo API key 60 second me",
+                            color = Tokens.AccentPrimary,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            "Bitget app → Profile icon → API Management → Create → Demo key banao · " +
+                                "permission: UTA account read + UTA trade read/write · 3 field yahan paste " +
+                                "karo aur DEMO switch ON rakho. Demo key = koi real paisa nahi lagega.",
+                            color = Tokens.TextSecondary,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
                 SecretField("Bitget API Key", s.bitgetKey) { v -> vm.update { it.copy(bitgetKey = v) } }
                 SecretField("Bitget Secret", s.bitgetSecret) { v -> vm.update { it.copy(bitgetSecret = v) } }
                 SecretField("Bitget Passphrase", s.bitgetPassphrase) { v -> vm.update { it.copy(bitgetPassphrase = v) } }
@@ -348,22 +368,73 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
 
             if (settingsTab == 4) {
             // ================= ③b MT5 / CFD =================
+            val bitgetReady = s.bitgetKey.isNotBlank() &&
+                s.bitgetSecret.isNotBlank() &&
+                s.bitgetPassphrase.isNotBlank()
+
             SectionCard(
                 step = "🥇",
                 title = "MT5 / CFD Account (Gold & Forex)",
-                subtitle = "Bitget CFD account = MT5 login. Account site par khol lein, API se nahi khulta."
+                subtitle = if (bitgetReady)
+                    "Bitget API key mil gayi — ab CFD Test se login verify karo."
+                else
+                    "⚠️ Login nahi hoga jab tak 🏦 Bitget API key nahi daali. MT5 ID/Password app use nahi karta."
             ) {
-                PlainField("MT5 Login ID", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
-                SecretField("MT5 Password", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
-                PlainField("MT5 Server (jaise ICMarkets-Demo)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
+                if (!bitgetReady) {
+                    Surface(
+                        color = Tokens.AccentDanger.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "⛔ Login kaise hoga — 3 step",
+                                color = Tokens.AccentDanger,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                "1️⃣  Bitget app/website → MT5/CFD account kholo " +
+                                    "(tumhara ID: ${s.mt5Login.ifBlank { "abhi daala nahi" }})",
+                                color = Tokens.TextPrimary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "2️⃣  Bitget → API Management → Demo API key banao. " +
+                                    "Permission me: UTA account read + UTA trade read/write",
+                                color = Tokens.TextPrimary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "3️⃣  Key / Secret / Passphrase paste karo aur DEMO switch ON rakho",
+                                color = Tokens.TextPrimary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Button(
+                                onClick = { settingsTab = 1 },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("👉 Abhi 🏦 Bitget tab me key daalo")
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = Tokens.BorderSubtle)
+                }
+
+                PlainField("MT5 Login ID (sirf reference)", s.mt5Login) { v -> vm.update { it.copy(mt5Login = v) } }
+                SecretField("MT5 Password (app isko use nahi karta)", s.mt5Password) { v -> vm.update { it.copy(mt5Password = v) } }
+                PlainField("MT5 Server (jaise Bitget-demo-live)", s.mt5Server) { v -> vm.update { it.copy(mt5Server = v) } }
                 TestRow("mt5", tests["mt5"]) { vm.testMt5() }
                 HorizontalDivider(color = Tokens.BorderSubtle)
 
                 TestRow("cfd", tests["cfd"]) { vm.testCfd() }
                 Text(
                     "Ye real CFD account check hai (/api/v3/cfd/account/fund-detail). " +
-                        "Agar account nahi mila to bitget.com ya Bitget app se MT5/CFD account kholein — " +
-                        "uske baad API key ke saath yahan OK aayega.",
+                        "Demo account ke liye Bitget demo API key chahiye — MT5 login/password " +
+                        "kabhi verify nahi hote. Agar 'account not found' aaye to pehle API key wala " +
+                        "step complete karo.",
                     color = Tokens.TextSecondary, style = MaterialTheme.typography.bodySmall
                 )
 

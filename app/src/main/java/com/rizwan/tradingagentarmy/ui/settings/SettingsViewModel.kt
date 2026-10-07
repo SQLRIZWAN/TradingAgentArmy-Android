@@ -434,7 +434,14 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun testMt5() = test("mt5") {
-        throw IllegalStateException("Not connected · this app's CFD trading uses Bitget API keys; MT5 login/password are not used or validated")
+        val st = _state.value
+        val keysReady = st.bitgetKey.isNotBlank() &&
+            st.bitgetSecret.isNotBlank() &&
+            st.bitgetPassphrase.isNotBlank()
+        if (!keysReady) throw IllegalStateException(
+            "MT5 ID/password yahan kaam nahi aate — 🏦 Bitget tab me API key + DEMO switch daalo"
+        )
+        "MT5 ID ${st.mt5Login.ifBlank { "—" }} · server ${st.mt5Server.ifBlank { "—" }} · API key set ✅"
     }
 
     fun testGemini() = test("gemini") { ai.testGemini() }
