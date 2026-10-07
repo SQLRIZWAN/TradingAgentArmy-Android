@@ -66,7 +66,12 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         return Base64.getEncoder().encodeToString(mac.doFinal((ts + method + path + body).toByteArray()))
     }
 
-    private suspend fun call(method: String, path: String, body: String = ""): Pair<Int, String> = withContext(Dispatchers.IO) {
+    private suspend fun call(
+        method: String,
+        path: String,
+        body: String = "",
+        paptrading: Boolean = prefs.bitgetDemo
+    ): Pair<Int, String> = withContext(Dispatchers.IO) {
         val ts = System.currentTimeMillis().toString()
         val req = Request.Builder().url("https://api.bitget.com$path")
             .addHeader("ACCESS-KEY", prefs.bitgetKey)
@@ -74,10 +79,69 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
             .addHeader("ACCESS-TIMESTAMP", ts)
             .addHeader("ACCESS-PASSPHRASE", prefs.bitgetPassphrase)
             .addHeader("Content-Type", "application/json")
-            .apply { if (prefs.bitgetDemo) addHeader("paptrading", "1") }
+            .apply { if (paptrading) addHeader("paptrading", "1") }
             .apply { if (method == "POST") post(body.toRequestBody("application/json".toMediaType())) else get() }
             .build()
         http.newCall(req).execute().use { it.code to (it.body?.string().orEmpty()) }
+    }
+
+    /** 40099 = demo/live environment mismatch (Bitget ke 2 demo mechanisms). */
+    private fun isEnvError(message: String): Boolean =
+        "40099" in message || "exchange environment" in message
+
+    private fun envHint(failed: String): String = buildString {
+        append(failed)
+        append(" → API key ka environment match nahi kar raha. Fix: (1) Bitget app → Profile → API")
+        append(" Management → Demo key bana kar DEMO switch ON rakho, ya (2) normal (real) key hai to")
+        append(" DEMO switch OFF karo. MT5 login/password se koi farak nahi padta.")
+    }
+
+    private data class EnvResult(val ok: Boolean, val message: String, val paptrading: Boolean, val productType: String)
+
+    /**
+     * Bitget demo ke do alag mechanism hain aur galat combo 40099 deta hai:
+     * `paptrading:1` header (demo key, mainnet) vs S-prefixed product type (testnet key).
+     * Yahan dono combos try karke jo chale wahi report kiya jata hai.
+     */
+    private suspend fun withEnvVariants(check: suspend (paptrading: Boolean, productType: String) -> Pair<Boolean, String>): EnvResult {
+        val baseProduct = prefs.getString("bitget_product_type", "USDT-FUTURES")
+        val sProduct = if (baseProduct.startsWith("S")) baseProduct else "S$baseProduct"
+        val variants = listOf(
+            prefs.bitgetDemo to baseProduct,
+            true to baseProduct,
+            false to baseProduct,
+            false to sProduct,
+            true to sProduct
+        ).distinct()
+        var last = ""
+        for ((pap, product) in variants) {
+            val (ok, msg) = runCatching { check(pap, product) }
+                .getOrElse { false to "network error: ${it.message?.take(120)}" }
+            if (ok) {
+                if (pap == prefs.bitgetDemo && product == baseProduct) return EnvResult(true, msg, pap, product)
+                val notes = mutableListOf<String>()
+                if (pap != prefs.bitgetDemo) {
+                    notes += if (pap) {
+                        "DEMO switch galat tha — ON karo (key Demo key hai, paptrading:1 chahiye)"
+                    } else {
+                        "DEMO switch galat tha — key REAL hai: OFF karo ya Bitget me Demo key banao"
+                    }
+                }
+                if (product != baseProduct) notes += "productType $product"
+                prefs.putBool("bitget_env_paptrading", pap)
+                if (product != baseProduct) prefs.putString("bitget_product_type", product)
+                return EnvResult(true, msg + " · " + notes.joinToString(" · "), pap, product)
+            }
+            last = msg
+            if (!isEnvError(msg)) return EnvResult(false, msg, pap, product)
+        }
+        return EnvResult(false, envHint(last), prefs.bitgetDemo, baseProduct)
+    }
+
+    private suspend fun checkSpot(pap: Boolean): Pair<Boolean, String> {
+        val (code, body) = call("GET", "/api/v2/spot/account/info", paptrading = pap)
+        val r = parse(body)
+        return (code in 200..299 && r.ok) to if (r.ok) "Spot API connected · account read OK" else "HTTP $code · ${r.message}"
     }
 
     private fun parse(raw: String): BitgetResult = runCatching {
@@ -104,21 +168,30 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
             "CFD" -> testCfdConnection()
             "FUTURES" -> testFuturesConnection()
             else -> {
-                val (code, body) = call("GET", "/api/v2/spot/account/info")
-                val r = parse(body)
-                if (code in 200..299 && r.ok) BitgetResult(true, "Spot API connected · authenticated account read succeeded")
-                else BitgetResult(false, "Spot account check failed · HTTP $code · ${r.message}")
+                val env = withEnvVariants { pap, _ -> checkSpot(pap) }
+                if (env.ok) BitgetResult(true, env.message) else BitgetResult(false, "Spot account check failed · ${env.message}")
             }
         }
     }
 
     /** Available CFD symbols incl. account-mode suffix (.s / .pro / none). */
-    suspend fun cfdInstruments(): List<String> = runCatching {
-        val (code, body) = call("GET", "/api/v3/cfd/account/instruments")
-        if (code !in 200..299 || !parse(body).ok) return emptyList()
+    suspend fun cfdInstruments(): List<String> {
+        val env = withEnvVariants { pap, _ ->
+            val (code, body) = call("GET", "/api/v3/cfd/account/instruments", paptrading = pap)
+            val r = parse(body)
+            if (code !in 200..299 || !r.ok) return@withEnvVariants false to "HTTP $code · ${r.message}"
+            true to "instruments OK"
+        }
+        if (!env.ok) error(env.message)
+        val (code, body) = call("GET", "/api/v3/cfd/account/instruments", paptrading = env.paptrading)
+        if (code !in 200..299 || !parse(body).ok) error("CFD instruments HTTP $code · ${parse(body).message}")
         val data = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
-        data.mapNotNull { it.jsonObject["symbol"]?.jsonPrimitive?.content }
-    }.getOrElse { emptyList() }
+        val list = data.mapNotNull { it.jsonObject["symbol"]?.jsonPrimitive?.content }
+        if (list.isEmpty()) {
+            error("Bitget par CFD/Gold account open nahi hai — app se nahi, Bitget app/website par CFD account kholo (API CFD account open nahi kar sakti)")
+        }
+        return list
+    }
 
     /**
      * Resolves the exchange's exact CFD symbol for a bare name like XAUUSD
@@ -137,23 +210,24 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
 
     /** Detects and stores the account-mode suffix ("" / ".s" / ".pro") from XAUUSD. */
     suspend fun autoDetectCfdSuffix(): String {
-        val list = runCatching { cfdInstruments() }.getOrDefault(emptyList())
+        val list = cfdInstruments()
         if (list.isEmpty()) return ""
-        val xau = list.firstOrNull { it.uppercase().startsWith("XAUUSD") } ?: return ""
+        val xau = list.firstOrNull { it.uppercase().startsWith("XAUUSD") }
+            ?: error("XAUUSD instrument list me nahi — mila: " + list.take(6).joinToString(", "))
         val suffix = xau.uppercase().removePrefix("XAUUSD")
         prefs.putString("bitget_cfd_suffix", suffix)
         return suffix
-
     }
 
-    suspend fun cfdAccountSnapshot(): Result<CfdAccountSnapshot> = runCatching {
+    suspend fun cfdAccountSnapshot(paptrading: Boolean = prefs.bitgetDemo): Result<CfdAccountSnapshot> = runCatching {
         if (!configured) error("Bitget API key/secret/passphrase missing")
-        val (code, body) = call("GET", "/api/v3/cfd/account/fund-detail")
+        val (code, body) = call("GET", "/api/v3/cfd/account/fund-detail", paptrading = paptrading)
         val response = parse(body)
         if (code !in 200..299 || !response.ok) error("CFD fund query HTTP $code · ${response.message}")
         val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
             ?: error("Bitget returned no CFD account data")
-        val positions = cfdPositionList().getOrElse { error("CFD balance is readable, but open positions could not be read · ${it.message}") }
+        val positions = cfdPositionList("", paptrading)
+            .getOrElse { error("CFD balance is readable, but open positions could not be read · ${it.message}") }
         CfdAccountSnapshot(
             currency = data.string("currency") ?: "USD",
             balance = data.number("balance"),
@@ -166,10 +240,21 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
     }
 
     private suspend fun testCfdConnection(): BitgetResult {
-        val (infoCode, infoBody) = call("GET", "/api/v3/account/info")
+        val env = withEnvVariants { pap, _ -> checkCfdAuth(pap) }
+        if (!env.ok) return BitgetResult(false, env.message)
+        val withdrawWarn = if (checkCfdAuth(env.paptrading).second.contains("withdraw")) " · withdraw permission hatao" else ""
+        return cfdAccountSnapshot(env.paptrading).fold(
+            onSuccess = { s -> BitgetResult(true, formatCfdSnapshot(s) + withdrawWarn) },
+            onFailure = { e -> BitgetResult(false, "API key authenticated, but CFD account check failed · ${e.message}") }
+        )
+    }
+
+    /** Auth + UTA permission probe for one paptrading variant. */
+    private suspend fun checkCfdAuth(pap: Boolean): Pair<Boolean, String> {
+        val (infoCode, infoBody) = call("GET", "/api/v3/account/info", paptrading = pap)
         val infoResult = parse(infoBody)
         if (infoCode !in 200..299 || !infoResult.ok) {
-            return BitgetResult(false, "Bitget API authentication failed · HTTP $infoCode · ${infoResult.message}")
+            return false to "Bitget API authentication failed · HTTP $infoCode · ${infoResult.message}"
         }
         val info = runCatching { json.parseToJsonElement(infoBody).jsonObject["data"]?.jsonObject }.getOrNull()
         val permType = info?.string("permType").orEmpty()
@@ -177,35 +262,29 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
             ?.mapNotNull { runCatching { it.jsonPrimitive.content }.getOrNull() }
             .orEmpty()
         if (permType.equals("read-only", true) || "uta_trade" !in permissions) {
-            return BitgetResult(false, "API key authenticated, but UTA trade permission is missing. Enable UTA read/write trading permission for CFD orders.")
+            return false to "API key authenticated, but UTA trade permission missing — Bitget API Management me UTA read+trade permission enable karo"
         }
-        if ("withdraw" in permissions) {
-            // Keep the connection usable, while making an unnecessary high-risk permission visible.
-            val account = cfdAccountSnapshot()
-            return account.fold(
-                onSuccess = { s -> BitgetResult(true, formatCfdSnapshot(s) + " · API key also has withdrawal permission; remove it if not needed") },
-                onFailure = { BitgetResult(false, "API key has UTA trade permission, but CFD account verification failed · ${it.message}") }
-            )
-        }
-        return cfdAccountSnapshot().fold(
-            onSuccess = { BitgetResult(true, formatCfdSnapshot(it)) },
-            onFailure = { BitgetResult(false, "CFD API key is not ready · ${it.message}") }
-        )
+        return true to if ("withdraw" in permissions) "withdraw permission present" else "uta_trade ok"
     }
 
     private suspend fun testFuturesConnection(): BitgetResult {
-        val product = prefs.getString("bitget_product_type", "USDT-FUTURES")
-        val (code, body) = call("GET", "/api/v2/mix/account/accounts?productType=$product")
-        val response = parse(body)
-        if (code !in 200..299 || !response.ok) return BitgetResult(false, "Futures account check failed · HTTP $code · ${response.message}")
-        val rows = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
-        val account = rows.firstOrNull()?.jsonObject ?: return BitgetResult(false, "Futures API connected, but no $product account was returned")
-        val available = account.number("available")
-        val equity = account.number("accountEquity")
-        val positions = currentFuturesPositions()
-        if (!positions.first) return BitgetResult(false, "Futures balance is readable, but positions query failed · ${parse(positions.second).message}")
-        val count = runCatching { json.parseToJsonElement(positions.second).jsonObject["data"] as? JsonArray }.getOrNull()?.size ?: 0
-        return BitgetResult(true, "$product connected · available ${"%.2f".format(Locale.US, available)} USDT · equity ${"%.2f".format(Locale.US, equity)} USDT · open positions $count")
+        val (ok, msg) = withEnvVariants { pap, product ->
+            val (code, body) = call("GET", "/api/v2/mix/account/accounts?productType=$product", paptrading = pap)
+            val response = parse(body)
+            if (code !in 200..299 || !response.ok) return@withEnvVariants false to "HTTP $code · ${response.message}"
+            val rows = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
+            val account = rows.firstOrNull()?.jsonObject
+                ?: return@withEnvVariants false to "no $product account returned"
+            val available = account.number("available")
+            val equity = account.number("accountEquity")
+            val positions = call("GET", "/api/v2/mix/position/all-position?productType=$product&marginCoin=USDT", paptrading = pap)
+            if (positions.first !in 200..299 || !parse(positions.second).ok)
+                return@withEnvVariants false to "balance OK but positions query failed · ${parse(positions.second).message}"
+            val count = runCatching { json.parseToJsonElement(positions.second).jsonObject["data"] as? JsonArray }.getOrNull()?.size ?: 0
+            true to ("$product connected · available ${"%.2f".format(Locale.US, available)} USDT · " +
+                "equity ${"%.2f".format(Locale.US, equity)} USDT · open positions $count")
+        }
+        return if (ok) BitgetResult(true, msg) else BitgetResult(false, "Futures account check failed · $msg")
     }
 
     private fun formatCfdSnapshot(snapshot: CfdAccountSnapshot): String =
@@ -328,8 +407,12 @@ class BitgetClient @Inject constructor(private val prefs: SecurePreferences) {
         return (code in 200..299 && parse(body).ok) to body
     }
 
-    suspend fun cfdPositionList(symbol: String = ""): Result<List<CfdPosition>> = runCatching {
-        val (code, body) = call("GET", "/api/v3/cfd/trade/current-positions" + if (symbol.isBlank()) "" else "?symbol=${symbol.uppercase()}")
+    suspend fun cfdPositionList(symbol: String = "", paptrading: Boolean = prefs.bitgetDemo): Result<List<CfdPosition>> = runCatching {
+        val (code, body) = call(
+            "GET",
+            "/api/v3/cfd/trade/current-positions" + if (symbol.isBlank()) "" else "?symbol=${symbol.uppercase()}",
+            paptrading = paptrading
+        )
         if (code !in 200..299 || !parse(body).ok) error("CFD positions HTTP $code: ${parse(body).message}")
         val data = json.parseToJsonElement(body).jsonObject["data"] as? JsonArray ?: JsonArray(emptyList())
         data.mapNotNull { row ->

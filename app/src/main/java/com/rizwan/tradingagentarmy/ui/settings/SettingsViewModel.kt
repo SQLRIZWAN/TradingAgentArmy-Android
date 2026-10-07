@@ -422,7 +422,7 @@ class SettingsViewModel @Inject constructor(
     fun detectCfdSuffix() = test("cfd_suffix") {
         save(silent = true)
         val suffix = bitgetClient.autoDetectCfdSuffix()
-        if (suffix.isBlank()) throw IllegalStateException("Instrument list empty — CFD keys/account check karein")
+        if (suffix.isBlank()) throw IllegalStateException("Instrument list khaali — 🏦 Bitget tab ka CFD Test pehle chalao")
         _state.value = _state.value.copy(cfdSuffix = suffix)
         "Detected suffix '$suffix' (XAUUSD$suffix)"
     }
