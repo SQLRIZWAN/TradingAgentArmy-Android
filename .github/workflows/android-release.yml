@@ -110,3 +110,11 @@ jobs:
         with:
           name: TradingAgentArmy-v${{ steps.apk.outputs.version }}
           path: dist/*.apk
+
+      # Keep the R8 mapping so crash reports from this exact build can be retraced.
+      - name: Upload R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: R8-mapping-v${{ steps.apk.outputs.version }}-${{ github.sha }}
+          path: app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: ignore
